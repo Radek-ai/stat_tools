@@ -1,0 +1,4 @@
+"""
+Power Analysis module
+"""
+
