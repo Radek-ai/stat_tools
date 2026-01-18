@@ -5,89 +5,16 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple
 
-
-def remove_nans(df: pd.DataFrame, column: str) -> pd.DataFrame:
-    """
-    Remove rows with NaN values in the specified column.
-    
-    Args:
-        df: Input dataframe
-        column: Column name to check for NaNs
-        
-    Returns:
-        Dataframe with NaNs removed
-    """
-    return df.dropna(subset=[column])
-
-
-def filter_outliers_percentile(df: pd.DataFrame, column: str, p_low: float, p_high: float) -> pd.DataFrame:
-    """
-    Filter outliers using percentile-based method.
-    Rows with values outside [p_low, p_high] percentiles are removed.
-    
-    Args:
-        df: Input dataframe
-        column: Column name to process
-        p_low: Lower percentile (0-100)
-        p_high: Upper percentile (0-100)
-        
-    Returns:
-        Dataframe with outliers removed
-    """
-    lower_bound = df[column].quantile(p_low / 100.0)
-    upper_bound = df[column].quantile(p_high / 100.0)
-    
-    # Keep only rows within the percentile range
-    filtered_df = df[(df[column] >= lower_bound) & (df[column] <= upper_bound)].copy()
-    return filtered_df
-
-
-def winsorize_percentile(df: pd.DataFrame, column: str, p_low: float, p_high: float) -> pd.DataFrame:
-    """
-    Winsorize (clip) outliers using percentile-based method.
-    Values outside [p_low, p_high] percentiles are clipped to those boundaries.
-    
-    Args:
-        df: Input dataframe
-        column: Column name to process
-        p_low: Lower percentile (0-100)
-        p_high: Upper percentile (0-100)
-        
-    Returns:
-        Dataframe with clipped values (same number of rows)
-    """
-    df = df.copy()
-    lower_bound = df[column].quantile(p_low / 100.0)
-    upper_bound = df[column].quantile(p_high / 100.0)
-    
-    # Clip values to boundaries
-    df[column] = df[column].clip(lower=lower_bound, upper=upper_bound)
-    return df
-
-
-def filter_outliers_iqr(df: pd.DataFrame, column: str, multiplier: float = 1.5) -> pd.DataFrame:
-    """
-    Filter outliers using IQR (Interquartile Range) method.
-    Rows with values outside Q1 - multiplier*IQR and Q3 + multiplier*IQR are removed.
-    
-    Args:
-        df: Input dataframe
-        column: Column name to process
-        multiplier: IQR multiplier (default 1.5)
-        
-    Returns:
-        Dataframe with outliers removed
-    """
-    Q1 = df[column].quantile(0.25)
-    Q3 = df[column].quantile(0.75)
-    IQR = Q3 - Q1
-    
-    lower_bound = Q1 - multiplier * IQR
-    upper_bound = Q3 + multiplier * IQR
-    
-    # Keep only rows within the IQR range
-    filtered_df = df[(df[column] >= lower_bound) & (df[column] <= upper_bound)].copy()
-    return filtered_df
+# Import shared filtering utilities
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utils.data_filtering import (
+    remove_nans,
+    filter_outliers_percentile,
+    filter_outliers_iqr,
+    winsorize_percentile
+)
 
 
 def calculate_statistics(df: pd.DataFrame, column: str) -> Dict[str, float]:

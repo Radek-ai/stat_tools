@@ -4,6 +4,7 @@ import numpy as np
 from scipy.stats import ttest_ind
 from tqdm import tqdm
 import itertools
+import random
 from typing import List, Dict, Union, Tuple
 
 class MultiGroupBalancer:
@@ -571,6 +572,390 @@ class MultiGroupBalancer:
             if iteration_gain <= gain_threshold:
                 break
                 
+            progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_gain:.4f}")
+        
+        self.loss_history = history
+        return df
+
+    # ------------------------------------------------------------------
+    # Batch Move Operations (Less Overfitting)
+    # ------------------------------------------------------------------
+    def _estimate_batch_move_gain_fast(
+        self,
+        df: pd.DataFrame,
+        batch_indices: pd.Index,
+        source_group: str,
+        target_group: str,
+        group_indices: Dict[str, pd.Index],
+        groups_list: List[str]
+    ) -> float:
+        """
+        Estimate gain of moving a batch of rows from Source -> Target using the cache.
+        """
+        if len(batch_indices) == 0:
+            return 0.0
+        
+        # Simulate new indices after moving the batch
+        new_idx_source = group_indices[source_group].difference(batch_indices)
+        new_idx_target = group_indices[target_group].union(batch_indices)
+        
+        old_affected_loss = 0.0
+        new_affected_loss = 0.0
+        
+        # A. Source-Target Pair
+        st_key = self._get_pair_key(source_group, target_group)
+        old_affected_loss += self.pairwise_loss_cache.get(st_key, 0.0)
+        new_affected_loss += self._compute_single_pair_loss(
+            df, new_idx_source, new_idx_target, source_group, target_group
+        )
+        
+        # B. Pairs involving Source (excluding Target)
+        for other_g in groups_list:
+            if other_g == source_group or other_g == target_group:
+                continue
+            
+            key = self._get_pair_key(source_group, other_g)
+            old_affected_loss += self.pairwise_loss_cache.get(key, 0.0)
+            new_loss = self._compute_single_pair_loss(
+                df, new_idx_source, group_indices[other_g], source_group, other_g
+            )
+            new_affected_loss += new_loss
+        
+        # C. Pairs involving Target (excluding Source)
+        for other_g in groups_list:
+            if other_g == source_group or other_g == target_group:
+                continue
+            
+            key = self._get_pair_key(target_group, other_g)
+            old_affected_loss += self.pairwise_loss_cache.get(key, 0.0)
+            new_loss = self._compute_single_pair_loss(
+                df, new_idx_target, group_indices[other_g], target_group, other_g
+            )
+            new_affected_loss += new_loss
+        
+        return old_affected_loss - new_affected_loss
+
+    def _apply_batch_move_and_update_cache(
+        self,
+        df: pd.DataFrame,
+        batch_indices: pd.Index,
+        source_group: str,
+        target_group: str,
+        group_indices: Dict[str, pd.Index],
+        groups_list: List[str]
+    ) -> float:
+        """
+        Actually move the batch of rows in the DF, update indices, and update the cache.
+        Returns the new total loss.
+        """
+        # 1. Update Dataframe
+        df.loc[batch_indices, self.group_column] = target_group
+        
+        # 2. Update Indices Map
+        group_indices[source_group] = group_indices[source_group].difference(batch_indices)
+        group_indices[target_group] = group_indices[target_group].union(batch_indices)
+        
+        # 3. Recompute and Update Cache for Affected Pairs
+        st_key = self._get_pair_key(source_group, target_group)
+        self.pairwise_loss_cache[st_key] = self._compute_single_pair_loss(
+            df, group_indices[source_group], group_indices[target_group], source_group, target_group
+        )
+        
+        for other_g in groups_list:
+            if other_g == source_group or other_g == target_group:
+                continue
+            
+            key_s = self._get_pair_key(source_group, other_g)
+            self.pairwise_loss_cache[key_s] = self._compute_single_pair_loss(
+                df, group_indices[source_group], group_indices[other_g], source_group, other_g
+            )
+            
+            key_t = self._get_pair_key(target_group, other_g)
+            self.pairwise_loss_cache[key_t] = self._compute_single_pair_loss(
+                df, group_indices[target_group], group_indices[other_g], target_group, other_g
+            )
+        
+        return sum(self.pairwise_loss_cache.values())
+
+    def balance_sequential_batch(
+        self,
+        df: pd.DataFrame,
+        max_iterations: int = 50,
+        subset_size: int = 5,
+        n_samples: int = 10,
+        gain_threshold: float = 0.001,
+        early_break: bool = True,
+        verbose: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Balance using batch moves (groups of rows at a time) to reduce overfitting.
+        
+        Parameters:
+        -----------
+        subset_size : int
+            Number of rows to move in each batch
+        n_samples : int
+            Number of random samples to try for each batch
+        """
+        df = df.copy()
+        history = []
+        
+        groups = df[self.group_column].unique().tolist()
+        group_indices = {g: df.index[df[self.group_column] == g] for g in groups}
+        
+        current_loss = self.initialize_loss_cache(df, group_indices)
+        history.append(current_loss)
+        
+        ordered_pairs = [(g1, g2) for g1 in groups for g2 in groups if g1 != g2]
+        
+        progress = tqdm(range(max_iterations), desc="Batch Sequential", unit="iter")
+        
+        for it in progress:
+            iteration_start_loss = current_loss
+            
+            random.shuffle(ordered_pairs)
+            
+            for source_group, target_group in ordered_pairs:
+                source_size = len(group_indices[source_group])
+                if source_size < subset_size:
+                    continue
+                
+                # Try multiple random samples of subset_size rows
+                best_gain = -np.inf
+                best_batch = None
+                
+                # Limit n_samples to avoid too many combinations
+                actual_n_samples = min(n_samples, 
+                                     max(1, source_size // subset_size))
+                
+                for _ in range(actual_n_samples):
+                    # Randomly sample subset_size rows from source group
+                    if source_size > subset_size:
+                        batch_indices = pd.Index(
+                            np.random.choice(
+                                group_indices[source_group], 
+                                subset_size, 
+                                replace=False
+                            )
+                        )
+                    else:
+                        batch_indices = group_indices[source_group]
+                    
+                    gain = self._estimate_batch_move_gain_fast(
+                        df, batch_indices, source_group, target_group,
+                        group_indices, groups
+                    )
+                    
+                    if gain > best_gain:
+                        best_gain = gain
+                        best_batch = batch_indices
+                        if early_break and best_gain > gain_threshold:
+                            break
+                
+                # Apply batch move if good enough
+                if best_batch is not None and best_gain > gain_threshold:
+                    current_loss = self._apply_batch_move_and_update_cache(
+                        df, best_batch, source_group, target_group, group_indices, groups
+                    )
+                    if verbose:
+                        print(f"  Batch move {len(best_batch)} rows: {source_group}->{target_group}, gain={best_gain:.4f}")
+            
+            history.append(current_loss)
+            iteration_realized_gain = iteration_start_loss - current_loss
+            
+            if verbose:
+                print(f"Iter {it}: Loss {iteration_start_loss:.5f} -> {current_loss:.5f}, Gain {iteration_realized_gain:.5f}")
+            
+            if iteration_realized_gain <= gain_threshold:
+                if verbose:
+                    print("Converged.")
+                break
+            
+            progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_realized_gain:.4f}")
+        
+        self.loss_history = history
+        return df
+
+    # ------------------------------------------------------------------
+    # Batch Swap Operations (Less Overfitting)
+    # ------------------------------------------------------------------
+    def _estimate_batch_swap_gain_fast(
+        self,
+        df: pd.DataFrame,
+        batch1_indices: pd.Index,
+        batch2_indices: pd.Index,
+        g1: str,
+        g2: str,
+        group_indices: Dict[str, pd.Index],
+        groups_list: List[str]
+    ) -> float:
+        """
+        Estimate swap gain: batch1(g1) <-> batch2(g2) using cache deltas.
+        """
+        if len(batch1_indices) == 0 or len(batch2_indices) == 0:
+            return 0.0
+        
+        # Simulate new indices after swapping batches
+        new_idx_g1 = group_indices[g1].difference(batch1_indices).union(batch2_indices)
+        new_idx_g2 = group_indices[g2].difference(batch2_indices).union(batch1_indices)
+        
+        old_affected_loss = 0.0
+        new_affected_loss = 0.0
+        
+        # G1-G2 pair
+        key = self._get_pair_key(g1, g2)
+        old_affected_loss += self.pairwise_loss_cache.get(key, 0.0)
+        new_affected_loss += self._compute_single_pair_loss(df, new_idx_g1, new_idx_g2, g1, g2)
+        
+        # G1-other pairs
+        for other_g in groups_list:
+            if other_g == g1 or other_g == g2:
+                continue
+            key = self._get_pair_key(g1, other_g)
+            old_affected_loss += self.pairwise_loss_cache.get(key, 0.0)
+            new_affected_loss += self._compute_single_pair_loss(df, new_idx_g1, group_indices[other_g], g1, other_g)
+        
+        # G2-other pairs
+        for other_g in groups_list:
+            if other_g == g1 or other_g == g2:
+                continue
+            key = self._get_pair_key(g2, other_g)
+            old_affected_loss += self.pairwise_loss_cache.get(key, 0.0)
+            new_affected_loss += self._compute_single_pair_loss(df, new_idx_g2, group_indices[other_g], g2, other_g)
+        
+        return old_affected_loss - new_affected_loss
+
+    def _apply_batch_swap_and_update_cache(
+        self,
+        df: pd.DataFrame,
+        batch1_indices: pd.Index,
+        batch2_indices: pd.Index,
+        g1: str,
+        g2: str,
+        group_indices: Dict[str, pd.Index],
+        groups_list: List[str]
+    ) -> float:
+        """
+        Execute batch swap, update indices/cache.
+        """
+        # Swap groups in DF
+        df.loc[batch1_indices, self.group_column] = g2
+        df.loc[batch2_indices, self.group_column] = g1
+        
+        # Update indices
+        group_indices[g1] = group_indices[g1].difference(batch1_indices).union(batch2_indices)
+        group_indices[g2] = group_indices[g2].difference(batch2_indices).union(batch1_indices)
+        
+        # Update cache
+        key = self._get_pair_key(g1, g2)
+        self.pairwise_loss_cache[key] = self._compute_single_pair_loss(df, group_indices[g1], group_indices[g2], g1, g2)
+        
+        for other_g in groups_list:
+            if other_g == g1 or other_g == g2:
+                continue
+            key_g1 = self._get_pair_key(g1, other_g)
+            self.pairwise_loss_cache[key_g1] = self._compute_single_pair_loss(df, group_indices[g1], group_indices[other_g], g1, other_g)
+            key_g2 = self._get_pair_key(g2, other_g)
+            self.pairwise_loss_cache[key_g2] = self._compute_single_pair_loss(df, group_indices[g2], group_indices[other_g], g2, other_g)
+        
+        return sum(self.pairwise_loss_cache.values())
+
+    def balance_swap_batch(
+        self,
+        df: pd.DataFrame,
+        max_iterations: int = 50,
+        subset_size: int = 5,
+        n_samples: int = 10,
+        gain_threshold: float = 0.001,
+        early_break: bool = True,
+        verbose: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Balance using batch swaps (groups of rows at a time) to reduce overfitting.
+        
+        Parameters:
+        -----------
+        subset_size : int
+            Number of rows to swap in each batch (same size for both groups)
+        n_samples : int
+            Number of random samples to try for each batch pair
+        """
+        df = df.copy()
+        history = []
+        
+        groups = df[self.group_column].unique().tolist()
+        group_indices = {g: df.index[df[self.group_column] == g] for g in groups}
+        
+        current_loss = self.initialize_loss_cache(df, group_indices)
+        history.append(current_loss)
+        
+        ordered_pairs = [(g1, g2) for g1 in groups for g2 in groups if g1 != g2]
+        
+        progress = tqdm(range(max_iterations), desc="Batch Swap", unit="iter")
+        
+        for it in progress:
+            iteration_start_loss = current_loss
+            
+            random.shuffle(ordered_pairs)
+            
+            for g1, g2 in ordered_pairs:
+                size1 = len(group_indices[g1])
+                size2 = len(group_indices[g2])
+                
+                if size1 < subset_size or size2 < subset_size:
+                    continue
+                
+                # Try multiple random samples
+                best_gain = -np.inf
+                best_batch_pair = None
+                
+                # Limit n_samples
+                actual_n_samples = min(n_samples, 
+                                     max(1, min(size1, size2) // subset_size))
+                
+                for _ in range(actual_n_samples):
+                    # Randomly sample batches from both groups
+                    if size1 > subset_size:
+                        batch1 = pd.Index(
+                            np.random.choice(group_indices[g1], subset_size, replace=False)
+                        )
+                    else:
+                        batch1 = group_indices[g1]
+                    
+                    if size2 > subset_size:
+                        batch2 = pd.Index(
+                            np.random.choice(group_indices[g2], subset_size, replace=False)
+                        )
+                    else:
+                        batch2 = group_indices[g2]
+                    
+                    gain = self._estimate_batch_swap_gain_fast(
+                        df, batch1, batch2, g1, g2, group_indices, groups
+                    )
+                    
+                    if gain > best_gain:
+                        best_gain = gain
+                        best_batch_pair = (batch1, batch2)
+                        if early_break and best_gain > gain_threshold:
+                            break
+                
+                if best_batch_pair is not None and best_gain > gain_threshold:
+                    batch1, batch2 = best_batch_pair
+                    current_loss = self._apply_batch_swap_and_update_cache(
+                        df, batch1, batch2, g1, g2, group_indices, groups
+                    )
+                    if verbose:
+                        print(f"Batch swap {len(batch1)}<->{len(batch2)} rows ({g1}<->{g2}), gain={best_gain:.4f}")
+            
+            history.append(current_loss)
+            iteration_gain = iteration_start_loss - current_loss
+            
+            if verbose:
+                print(f"Iter {it}: {iteration_start_loss:.5f} -> {current_loss:.5f}, gain={iteration_gain:.5f}")
+            
+            if iteration_gain <= gain_threshold:
+                break
+            
             progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_gain:.4f}")
         
         self.loss_history = history

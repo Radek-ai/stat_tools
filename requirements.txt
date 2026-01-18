@@ -3,3 +3,7 @@ numpy
 pandas
 streamlit
 statsmodels
+tqdm
+seaborn
+openpyxl
+scipy

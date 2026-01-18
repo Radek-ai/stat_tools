@@ -1,0 +1,27 @@
+"""
+Rebalancer Page - Post-Experiment Group Balancing Tool
+"""
+import streamlit as st
+
+from rebalancer.ui_components import (
+    render_data_upload,
+    render_rebalancing
+)
+
+
+def show_rebalancer_page():
+    """Main function to render the Rebalancer page"""
+    st.title("⚖️ Group Rebalancer Tool")
+    st.markdown("Upload data with existing groups and rebalance by trimming rows")
+    
+    # Create tabs
+    tab_upload, tab_rebalancing = st.tabs([
+        "📤 Data Upload",
+        "⚖️ Rebalancing"
+    ])
+    
+    with tab_upload:
+        render_data_upload()
+    
+    with tab_rebalancing:
+        render_rebalancing()
