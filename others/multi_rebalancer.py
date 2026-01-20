@@ -234,13 +234,13 @@ class MultiGroupRebalancer:
             return random.choice([g1_name, g2_name])
 
         # Prefer trimming from larger group
-        p = 0.9 if n1 > n2 else 0.1
+        p = 0.8 if n1 > n2 else 0.2
         if random.random() < p:
             return g1_name if n1 > n2 else g2_name
         else:
             return g2_name if n1 > n2 else g1_name
 
-    def find_best_even_size_seed_multi(self, df: pd.DataFrame, trials: int) -> pd.Index:
+    def find_best_even_size_seed_multi(self, df: pd.DataFrame, trials: int, progress_callback=None) -> pd.Index:
         """
         Find the best random seed for subsampling all groups to the size of the smallest group,
         minimizing total loss.
@@ -265,9 +265,16 @@ class MultiGroupRebalancer:
         initial_loss = self.compute_total_loss(df)
         best_gain = 0.0
         
-        progress_bar = tqdm(range(trials), desc=f"Multi-group seed search, initial loss: {initial_loss:.4f}", unit="trial")
+        if progress_callback:
+            progress_callback("start", {
+                "total": trials,
+                "initial_loss": initial_loss,
+                "description": "Multi-group seed search"
+            })
+        else:
+            progress_bar = tqdm(range(trials), desc=f"Multi-group seed search, initial loss: {initial_loss:.4f}", unit="trial")
         
-        for seed in progress_bar:
+        for seed in range(trials):
             drop_indices = pd.Index([])
             
             # For each group, subsample to min_size if it's larger
@@ -291,7 +298,25 @@ class MultiGroupRebalancer:
                     best_indices = drop_indices
                     best_gain = gain
             
-            progress_bar.set_postfix(best_gain=best_gain)
+            if progress_callback:
+                progress_callback("update", {
+                    "iteration": seed + 1,
+                    "total": trials,
+                    "initial_loss": initial_loss,
+                    "current_loss": best_loss,
+                    "gain": best_gain,
+                    "progress": (seed + 1) / trials
+                })
+            else:
+                progress_bar.set_postfix(best_gain=best_gain)
+        
+        if progress_callback:
+            progress_callback("complete", {
+                "final_loss": best_loss,
+                "initial_loss": initial_loss,
+                "total_iterations": trials,
+                "total_gain": best_gain
+            })
         
         return best_indices
 
@@ -299,7 +324,8 @@ class MultiGroupRebalancer:
                   max_removals: int = 100, top_k_candidates: int = 20,
                   k_random_candidates: int = 20, verbose: bool = False,
                   early_break_regularization: bool = True, gain_threshold: float = 0.000,
-                  trim_from: Optional[str] = None) -> pd.DataFrame:
+                  trim_from: Optional[str] = None, progress_callback=None,
+                  step_info: Optional[Dict[str, int]] = None) -> pd.DataFrame:
         """
         Trim the DataFrame to balance a specific pair of groups.
 
@@ -321,8 +347,20 @@ class MultiGroupRebalancer:
         df = df.copy()
         removals = 0
         total_gain = 0.0
+        initial_pair_loss = self.compute_pair_loss(df, g1_name, g2_name)
         
-        for _ in range(max_removals):
+        if progress_callback:
+            step_text = ""
+            if step_info:
+                step_text = f"Step {step_info.get('current', 1)}/{step_info.get('total', 1)}: "
+            progress_callback("start", {
+                "total": max_removals,
+                "initial_loss": initial_pair_loss,
+                "description": f"{step_text}Trimming pair ({g1_name}, {g2_name})",
+                "step_info": step_info
+            })
+        
+        for removal_idx in range(max_removals):
             current_pair_loss = self.compute_pair_loss(df, g1_name, g2_name)
             
             group_to_trim = self.choose_group_to_trim(df, g1_name, g2_name, trim_from=trim_from)
@@ -364,15 +402,38 @@ class MultiGroupRebalancer:
             df = df.drop(index=best_idx)
             removals += 1
             total_gain += best_delta
+            current_pair_loss = self.compute_pair_loss(df, g1_name, g2_name)
+            
             if verbose:
                 print(f"Removed index {best_idx} from {group_to_trim}, Δloss = {best_delta:.4f}")
-
+            
+            if progress_callback:
+                progress_callback("update", {
+                    "iteration": removal_idx + 1,
+                    "total": max_removals,
+                    "initial_loss": initial_pair_loss,
+                    "current_loss": current_pair_loss,
+                    "gain": best_delta,
+                    "progress": (removal_idx + 1) / max_removals,
+                    "step_info": step_info
+                })
+        
+        if progress_callback:
+            final_pair_loss = self.compute_pair_loss(df, g1_name, g2_name)
+            progress_callback("complete", {
+                "final_loss": final_pair_loss,
+                "initial_loss": initial_pair_loss,
+                "total_iterations": removals,
+                "total_gain": total_gain
+            })
+        
         return df
 
     def rebalance_multi_group(self, df: pd.DataFrame, max_removals: int = 100,
                              top_k_candidates: int = 20, k_random_candidates: int = 20,
                              verbose: bool = False, early_break_regularization: bool = True,
-                             gain_threshold: float = 0.000, even_size_seed_trials: int = 0) -> pd.DataFrame:
+                             gain_threshold: float = 0.000, even_size_seed_trials: int = 0,
+                             progress_callback=None, continuation: bool = False) -> pd.DataFrame:
         """
         Rebalance multiple groups by finding middle/odd groups and balancing sequentially.
 
@@ -386,18 +447,23 @@ class MultiGroupRebalancer:
         gain_threshold (float): The threshold for early break based on gain.
         even_size_seed_trials (int): If >0, perform this many random seed trials to subsample
             all groups to the smallest group size, minimizing total loss.
+        progress_callback (Callable, optional): Callback function for progress updates.
+        continuation (bool): If True, always trim from odd group in first step to preserve
+            middle group as anchor. If False (first run), allow trimming from either group.
 
         Returns:
         pd.DataFrame: The rebalanced DataFrame.
         """
         df = df.copy()
         self.loss_history = []
+        current_step = 0
         
         # Step 1: Even size seed search (if requested)
         if even_size_seed_trials > 0:
             if verbose:
                 print("Performing multi-group even size seed search...")
-            drop_indices = self.find_best_even_size_seed_multi(df, even_size_seed_trials)
+            # Even size search has its own callback, so we don't need step info here
+            drop_indices = self.find_best_even_size_seed_multi(df, even_size_seed_trials, progress_callback=progress_callback)
             if len(drop_indices) > 0:
                 df = df.drop(index=drop_indices)
                 if verbose:
@@ -416,7 +482,15 @@ class MultiGroupRebalancer:
         if verbose:
             print(f"Middle group: {middle_group}, Odd group: {odd_group}")
         
-        # Step 3: Balance (middle, odd) - can trim from either
+        # Calculate remaining groups and total steps
+        remaining_groups = [g for g in df[self.group_column].unique() 
+                           if g not in [middle_group, odd_group]]
+        total_steps = 1 + len(remaining_groups)  # 1 for (middle, odd) + N for (middle, X)
+        
+        # Step 3: Balance (middle, odd)
+        # If continuation=True, always trim from odd to preserve middle as anchor
+        # If continuation=False (first run), allow trimming from either group
+        current_step += 1
         if verbose:
             print(f"Balancing pair ({middle_group}, {odd_group})...")
         df = self.trim_pair(df, middle_group, odd_group,
@@ -425,14 +499,15 @@ class MultiGroupRebalancer:
                            k_random_candidates=k_random_candidates,
                            verbose=verbose,
                            early_break_regularization=early_break_regularization,
-                           gain_threshold=gain_threshold)
+                           gain_threshold=gain_threshold,
+                           trim_from=odd_group if continuation else None,  # Trim from odd if continuation, otherwise allow either
+                           progress_callback=progress_callback,
+                           step_info={"current": current_step, "total": total_steps})
         self.loss_history.append(self.compute_total_loss(df))
         
         # Step 4: Balance (middle, X) for each remaining group
-        remaining_groups = [g for g in df[self.group_column].unique() 
-                           if g not in [middle_group, odd_group]]
-        
         for group_x in remaining_groups:
+            current_step += 1
             if verbose:
                 print(f"Balancing pair ({middle_group}, {group_x})...")
             # Always trim from X, not from middle (middle is anchor)
@@ -443,7 +518,18 @@ class MultiGroupRebalancer:
                                verbose=verbose,
                                early_break_regularization=early_break_regularization,
                                gain_threshold=gain_threshold,
-                               trim_from=group_x)
+                               trim_from=group_x,
+                               progress_callback=progress_callback,
+                               step_info={"current": current_step, "total": total_steps})
             self.loss_history.append(self.compute_total_loss(df))
+        
+        if progress_callback:
+            final_loss = self.compute_total_loss(df)
+            progress_callback("complete", {
+                "final_loss": final_loss,
+                "initial_loss": initial_loss,
+                "total_iterations": len(self.loss_history) - 1,
+                "total_gain": initial_loss - final_loss
+            })
         
         return df

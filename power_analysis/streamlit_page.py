@@ -24,23 +24,28 @@ from power_analysis.components import (
     render_scenario_selector,
     render_validation_message
 )
-from power_analysis.scenarios_design import render_scenarios_design_page
+from power_analysis.scenarios_design import render_data_upload, render_configuration_page
 def show_power_analysis_page():
     # Page title
     st.title("📊 Statistical Power Analysis Tool")
     st.markdown("Analyze required sample sizes for A/B testing based on various statistical parameters")
 
     # Create main tabs for subpages
-    tab_scenarios, tab_analysis = st.tabs([
-        "📊 Scenarios Design",
+    tab_upload, tab_config, tab_analysis = st.tabs([
+        "📤 Data Upload",
+        "⚙️ Configuration",
         "🔬 Power Analysis"
     ])
 
-    # Tab 1: Scenarios Design
-    with tab_scenarios:
-        render_scenarios_design_page()
+    # Tab 1: Data Upload
+    with tab_upload:
+        render_data_upload()
+    
+    # Tab 2: Configuration
+    with tab_config:
+        render_configuration_page()
 
-    # Tab 2: Power Analysis
+    # Tab 3: Power Analysis
     with tab_analysis:
         # Configuration section
         config = render_configuration_section()

@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import List, Optional
 from scipy.stats import ttest_ind
+from utils.data_filtering import is_id_column
 
 
 def _smd(x1, x2):
@@ -99,19 +100,24 @@ def create_balance_report_plotly(
             f"{col}: p-value"
         ])
     
-    # Add categorical column rows (1 column each, but need to pad to max_cols)
+    # Add categorical column rows (stacked bar spanning 3 cols + heatmap in 4th col)
     for col in strat_columns:
         if col not in df.columns:
             continue
-        row_spec = [{"type": "bar"}]
-        # Pad with None if needed
-        while len(row_spec) < max_cols:
-            row_spec.append(None)
+        # Stacked bar chart spans 3 columns, heatmap in 4th column
+        row_spec = [
+            {"type": "bar", "colspan": 3},
+            None,  # Placeholder for colspan
+            None,  # Placeholder for colspan
+            {"type": "heatmap"}
+        ]
         specs.append(row_spec)
-        subplot_titles.append(f"{col}: Total Imbalance (%)")
-        # Pad titles to match columns
-        for _ in range(max_cols - 1):
-            subplot_titles.append("")
+        subplot_titles.extend([
+            f"{col}: Distribution by Group",
+            "",  # Placeholder for colspan
+            "",  # Placeholder for colspan
+            f"{col}: Pairwise Imbalance (%)"
+        ])
     
     # Create figure with subplots
     fig = make_subplots(
@@ -130,6 +136,10 @@ def create_balance_report_plotly(
     # =========================
     for col in value_columns:
         if col not in df.columns:
+            continue
+        
+        # Skip ID columns (all values unique)
+        if is_id_column(df, col):
             continue
         
         # Filter valid groups (with sufficient data)
@@ -242,10 +252,14 @@ def create_balance_report_plotly(
         row_idx += 1
     
     # =========================
-    # Categorical columns
+    # Categorical columns (Stacked bar + Heatmap)
     # =========================
     for col in strat_columns:
         if col not in df.columns:
+            continue
+        
+        # Skip ID columns (all values unique)
+        if is_id_column(df, col):
             continue
         
         try:
@@ -263,18 +277,60 @@ def create_balance_report_plotly(
             if len(ct) == 0:
                 continue
             
-            overall = ct.mean(axis=0)
-            imbalance = (ct.sub(overall, axis=1).abs().sum(axis=1)) * 100
+            groups = sorted(ct.index.tolist())
+            n_groups = len(groups)
+            categories = sorted(ct.columns.tolist())
+            
+            if n_groups < 2:
+                continue
+            
+            # ===== Stacked Bar Chart (col 1, spanning 3 columns) =====
+            # Normalize by column (category) so each bar totals 100%
+            # This shows what percentage of each category belongs to each group
+            ct_normalized = pd.crosstab(tmp[group_column], tmp[col], normalize="columns").fillna(0)
+            
+            # Create stacked bar chart - one trace per group
+            for group in groups:
+                fig.add_trace(
+                    go.Bar(
+                        x=categories,
+                        y=ct_normalized.loc[group].values * 100,  # Convert to percentage
+                        name=str(group),
+                        showlegend=(row_idx == 1),  # Only show legend for first categorical row
+                        hovertemplate=f'<b>{group}</b><br>Category: %{{x}}<br>Percentage: %{{y:.2f}}%<extra></extra>'
+                    ),
+                    row=row_idx, col=1
+                )
+            
+            # ===== Heatmap (col 4) =====
+            # Calculate pairwise imbalance matrix
+            imbalance_matrix = pd.DataFrame(0.0, index=groups, columns=groups)
+            
+            for i, g1 in enumerate(groups):
+                for j, g2 in enumerate(groups):
+                    if i != j:
+                        # Pairwise difference: |g1_distribution - g2_distribution|.sum() * 100
+                        diff = (ct.loc[g1] - ct.loc[g2]).abs().sum() * 100
+                        imbalance_matrix.loc[g1, g2] = diff
+            
+            # Set diagonal to NaN for cleaner visualization
+            for g in groups:
+                imbalance_matrix.loc[g, g] = np.nan
             
             fig.add_trace(
-                go.Bar(
-                    x=imbalance.index,
-                    y=imbalance.values,
-                    name=f"{col} Imbalance",
-                    marker_color='coral',
-                    showlegend=False
+                go.Heatmap(
+                    z=imbalance_matrix.values,
+                    x=imbalance_matrix.columns,
+                    y=imbalance_matrix.index,
+                    colorscale='Reds',
+                    showscale=True,
+                    colorbar=dict(title="Imbalance (%)", len=0.4, y=0.5),
+                    text=imbalance_matrix.values,
+                    texttemplate='%{text:.1f}%',
+                    textfont={"size": 10},
+                    hovertemplate='%{y} vs %{x}<br>Imbalance: %{z:.2f}%<extra></extra>'
                 ),
-                row=row_idx, col=1
+                row=row_idx, col=4
             )
             
             row_idx += 1
@@ -291,8 +347,9 @@ def create_balance_report_plotly(
             font=dict(size=20, color='#1f77b4')
         ),
         height=300 * row_idx,  # Dynamic height based on number of rows
-        showlegend=False,
-        template='plotly_white'
+        showlegend=True,  # Show legend for stacked bars
+        template='plotly_white',
+        barmode='stack'  # Stack bars for categorical columns
     )
     
     # Update axes labels
@@ -327,13 +384,18 @@ def create_balance_report_plotly(
         
         current_row += 1
     
-    # Update categorical column rows
+    # Update categorical column rows (stacked bar + heatmap)
     for col in strat_columns:
         if col not in df.columns:
             continue
         
-        fig.update_xaxes(title_text="Group", row=current_row, col=1)
-        fig.update_yaxes(title_text="Imbalance (%)", row=current_row, col=1)
+        # Stacked bar chart (spans cols 1-3)
+        fig.update_xaxes(title_text="Category", row=current_row, col=1)
+        fig.update_yaxes(title_text="Percentage (%)", row=current_row, col=1)
+        
+        # Heatmap (col 4)
+        fig.update_xaxes(title_text="Group", row=current_row, col=4)
+        fig.update_yaxes(title_text="Group", row=current_row, col=4)
         
         current_row += 1
     

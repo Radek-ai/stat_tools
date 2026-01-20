@@ -256,6 +256,7 @@ class MultiGroupBalancer:
         gain_threshold: float = 0.001, # slightly higher default to stop micro-moves
         early_break: bool = True,
         verbose: bool = False,
+        progress_callback=None,
     ) -> pd.DataFrame:
         df = df.copy()
         history = []
@@ -271,9 +272,16 @@ class MultiGroupBalancer:
 
         ordered_pairs = [(g1, g2) for g1 in groups for g2 in groups if g1 != g2]
         
-        progress = tqdm(range(max_iterations), desc="Sequential Multi-Pair", unit="iter")
+        if progress_callback:
+            progress_callback("start", {
+                "total": max_iterations,
+                "initial_loss": initial_loss,
+                "description": "Sequential Multi-Pair Balancing"
+            })
+        else:
+            progress = tqdm(range(max_iterations), desc="Sequential Multi-Pair", unit="iter")
 
-        for it in progress:
+        for it in range(max_iterations):
             iteration_start_loss = current_loss
             
             # Shuffle pairs to avoid bias
@@ -326,15 +334,34 @@ class MultiGroupBalancer:
 
             if verbose:
                 print(f"Iter {it}: Loss {iteration_start_loss:.5f} -> {current_loss:.5f}, Gain {iteration_realized_gain:.5f}")
-
+            
+            if progress_callback:
+                progress_callback("update", {
+                    "iteration": it + 1,
+                    "total": max_iterations,
+                    "initial_loss": initial_loss,
+                    "current_loss": current_loss,
+                    "gain": iteration_realized_gain,
+                    "progress": (it + 1) / max_iterations
+                })
+            else:
+                progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_realized_gain:.4f}")
+            
             if iteration_realized_gain <= gain_threshold:
                 if verbose:
                     print("Converged.")
                 break
 
-            progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_realized_gain:.4f}")
-
         self.loss_history = history
+        
+        if progress_callback:
+            progress_callback("complete", {
+                "final_loss": current_loss,
+                "initial_loss": initial_loss,
+                "total_iterations": len(history) - 1,
+                "total_gain": initial_loss - current_loss
+            })
+        
         return df
 
     # ------------------------------------------------------------------
@@ -502,6 +529,7 @@ class MultiGroupBalancer:
         gain_threshold: float = 0.001,
         early_break: bool = True,
         verbose: bool = False,
+        progress_callback=None,
     ) -> pd.DataFrame:
         """
         Swap-optimized version using the same cache infrastructure.
@@ -515,13 +543,21 @@ class MultiGroupBalancer:
         group_indices = {g: df.index[df[self.group_column] == g] for g in groups}
         
         current_loss = self.initialize_loss_cache(df, group_indices)
+        initial_loss = current_loss
         history.append(current_loss)
         
         ordered_pairs = [(g1, g2) for g1 in groups for g2 in groups if g1 != g2]
         
-        progress = tqdm(range(max_iterations), desc="Swap Multi-Pair", unit="iter")
+        if progress_callback:
+            progress_callback("start", {
+                "total": max_iterations,
+                "initial_loss": initial_loss,
+                "description": "Swap Multi-Pair Balancing"
+            })
+        else:
+            progress = tqdm(range(max_iterations), desc="Swap Multi-Pair", unit="iter")
         
-        for it in progress:
+        for it in range(max_iterations):
             iteration_start_loss = current_loss
             
             # Precompute candidates per group (shared across pairs)
@@ -569,12 +605,31 @@ class MultiGroupBalancer:
             if verbose:
                 print(f"Iter {it}: {iteration_start_loss:.5f} -> {current_loss:.5f}, gain={iteration_gain:.5f}")
             
+            if progress_callback:
+                progress_callback("update", {
+                    "iteration": it + 1,
+                    "total": max_iterations,
+                    "initial_loss": initial_loss,
+                    "current_loss": current_loss,
+                    "gain": iteration_gain,
+                    "progress": (it + 1) / max_iterations
+                })
+            else:
+                progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_gain:.4f}")
+            
             if iteration_gain <= gain_threshold:
                 break
-                
-            progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_gain:.4f}")
         
         self.loss_history = history
+        
+        if progress_callback:
+            progress_callback("complete", {
+                "final_loss": current_loss,
+                "initial_loss": initial_loss,
+                "total_iterations": len(history) - 1,
+                "total_gain": initial_loss - current_loss
+            })
+        
         return df
 
     # ------------------------------------------------------------------
@@ -686,6 +741,7 @@ class MultiGroupBalancer:
         gain_threshold: float = 0.001,
         early_break: bool = True,
         verbose: bool = False,
+        progress_callback=None,
     ) -> pd.DataFrame:
         """
         Balance using batch moves (groups of rows at a time) to reduce overfitting.
@@ -704,13 +760,21 @@ class MultiGroupBalancer:
         group_indices = {g: df.index[df[self.group_column] == g] for g in groups}
         
         current_loss = self.initialize_loss_cache(df, group_indices)
+        initial_loss = current_loss
         history.append(current_loss)
         
         ordered_pairs = [(g1, g2) for g1 in groups for g2 in groups if g1 != g2]
         
-        progress = tqdm(range(max_iterations), desc="Batch Sequential", unit="iter")
+        if progress_callback:
+            progress_callback("start", {
+                "total": max_iterations,
+                "initial_loss": initial_loss,
+                "description": "Batch Sequential Balancing"
+            })
+        else:
+            progress = tqdm(range(max_iterations), desc="Batch Sequential", unit="iter")
         
-        for it in progress:
+        for it in range(max_iterations):
             iteration_start_loss = current_loss
             
             random.shuffle(ordered_pairs)
@@ -766,14 +830,33 @@ class MultiGroupBalancer:
             if verbose:
                 print(f"Iter {it}: Loss {iteration_start_loss:.5f} -> {current_loss:.5f}, Gain {iteration_realized_gain:.5f}")
             
+            if progress_callback:
+                progress_callback("update", {
+                    "iteration": it + 1,
+                    "total": max_iterations,
+                    "initial_loss": initial_loss,
+                    "current_loss": current_loss,
+                    "gain": iteration_realized_gain,
+                    "progress": (it + 1) / max_iterations
+                })
+            else:
+                progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_realized_gain:.4f}")
+            
             if iteration_realized_gain <= gain_threshold:
                 if verbose:
                     print("Converged.")
                 break
-            
-            progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_realized_gain:.4f}")
         
         self.loss_history = history
+        
+        if progress_callback:
+            progress_callback("complete", {
+                "final_loss": current_loss,
+                "initial_loss": initial_loss,
+                "total_iterations": len(history) - 1,
+                "total_gain": initial_loss - current_loss
+            })
+        
         return df
 
     # ------------------------------------------------------------------
@@ -869,6 +952,7 @@ class MultiGroupBalancer:
         gain_threshold: float = 0.001,
         early_break: bool = True,
         verbose: bool = False,
+        progress_callback=None,
     ) -> pd.DataFrame:
         """
         Balance using batch swaps (groups of rows at a time) to reduce overfitting.
@@ -887,13 +971,21 @@ class MultiGroupBalancer:
         group_indices = {g: df.index[df[self.group_column] == g] for g in groups}
         
         current_loss = self.initialize_loss_cache(df, group_indices)
+        initial_loss = current_loss
         history.append(current_loss)
         
         ordered_pairs = [(g1, g2) for g1 in groups for g2 in groups if g1 != g2]
         
-        progress = tqdm(range(max_iterations), desc="Batch Swap", unit="iter")
+        if progress_callback:
+            progress_callback("start", {
+                "total": max_iterations,
+                "initial_loss": initial_loss,
+                "description": "Batch Swap Balancing"
+            })
+        else:
+            progress = tqdm(range(max_iterations), desc="Batch Swap", unit="iter")
         
-        for it in progress:
+        for it in range(max_iterations):
             iteration_start_loss = current_loss
             
             random.shuffle(ordered_pairs)
@@ -953,10 +1045,29 @@ class MultiGroupBalancer:
             if verbose:
                 print(f"Iter {it}: {iteration_start_loss:.5f} -> {current_loss:.5f}, gain={iteration_gain:.5f}")
             
+            if progress_callback:
+                progress_callback("update", {
+                    "iteration": it + 1,
+                    "total": max_iterations,
+                    "initial_loss": initial_loss,
+                    "current_loss": current_loss,
+                    "gain": iteration_gain,
+                    "progress": (it + 1) / max_iterations
+                })
+            else:
+                progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_gain:.4f}")
+            
             if iteration_gain <= gain_threshold:
                 break
-            
-            progress.set_postfix(loss=f"{current_loss:.4f}", gain=f"{iteration_gain:.4f}")
         
         self.loss_history = history
+        
+        if progress_callback:
+            progress_callback("complete", {
+                "final_loss": current_loss,
+                "initial_loss": initial_loss,
+                "total_iterations": len(history) - 1,
+                "total_gain": initial_loss - current_loss
+            })
+        
         return df

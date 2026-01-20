@@ -7,6 +7,26 @@ import numpy as np
 from typing import Dict, List, Tuple
 
 
+def is_id_column(df: pd.DataFrame, col: str) -> bool:
+    """
+    Check if a column is an ID column (all values are unique).
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        The DataFrame to check
+    col : str
+        Column name to check
+        
+    Returns:
+    --------
+    bool: True if column is an ID column (unique count == total rows)
+    """
+    if col not in df.columns:
+        return False
+    return df[col].nunique() == len(df)
+
+
 def remove_nans(df: pd.DataFrame, column: str) -> pd.DataFrame:
     """
     Remove rows with NaN values in the specified column.

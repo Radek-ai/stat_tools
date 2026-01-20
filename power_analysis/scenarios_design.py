@@ -9,24 +9,33 @@ import json
 from power_analysis.data_processing import compute_all_scenarios
 
 
-def render_scenarios_design_page():
-    """Render the scenarios design page"""
-    st.header("📊 Scenarios Design")
-    st.markdown("Upload CSV data and configure scenarios with outlier filtering and metrics")
-    
+def render_data_upload():
+    """Render the data upload section"""
     # Initialize session state
     if 'uploaded_df' not in st.session_state:
         st.session_state.uploaded_df = None
-    if 'scenarios_config' not in st.session_state:
-        st.session_state.scenarios_config = []
-    if 'computed_stats' not in st.session_state:
-        st.session_state.computed_stats = None
     
-    # Section 1: CSV Upload
-    st.subheader("📁 Upload Data")
+    st.header("📤 Upload Data")
+    st.markdown("Upload CSV data for power analysis")
+    
+    # Dummy data loader expander
+    with st.expander("🎲 Load Dummy Data", expanded=False):
+        st.markdown("Load pre-generated sample data for testing")
+        
+        if st.button("🎲 Load Dummy Data", key="power_load_dummy", type="primary"):
+            import os
+            dummy_file = os.path.join("dummy_data", "power_analysis_dummy.csv")
+            if os.path.exists(dummy_file):
+                df = pd.read_csv(dummy_file)
+                st.session_state.uploaded_df = df
+                st.success(f"✅ Dummy data loaded! ({len(df)} rows, {len(df.columns)} columns)")
+                st.rerun()
+            else:
+                st.error(f"❌ Dummy data file not found: {dummy_file}")
+                st.info("💡 Run 'python dummy_data_builders/generate_all_dummy_data.py' to generate the files")
     
     uploaded_file = st.file_uploader(
-        "Upload CSV file",
+        "Or upload CSV file",
         type=['csv'],
         key="csv_uploader"
     )
@@ -34,62 +43,104 @@ def render_scenarios_design_page():
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
         st.session_state.uploaded_df = df
-        
         st.success(f"✅ File uploaded successfully! ({len(df)} rows, {len(df.columns)} columns)")
+    
+    # Show preview if data exists (from dummy or upload)
+    if st.session_state.uploaded_df is not None:
+        df = st.session_state.uploaded_df
+        
+        # Basic statistics
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        with col_stat1:
+            st.metric("Total Rows", f"{len(df):,}")
+        with col_stat2:
+            st.metric("Total Columns", len(df.columns))
+        with col_stat3:
+            numeric_count = len(df.select_dtypes(include=[np.number]).columns)
+            st.metric("Numeric Columns", numeric_count)
         
         # Show preview
-        with st.expander("📋 Data Preview"):
-            st.dataframe(df.head(10), use_container_width=True)
-            st.caption(f"Total rows: {len(df)}, Columns: {', '.join(df.columns.tolist())}")
+        with st.expander("📋 Data Preview", expanded=True):
+            st.dataframe(df.head(20), use_container_width=True)
+            st.caption(f"Showing first 20 rows of {len(df):,} total rows")
         
-        # Show numeric columns
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        if numeric_cols:
-            st.info(f"📊 Numeric columns detected: {', '.join(numeric_cols)}")
-        else:
-            st.warning("⚠️ No numeric columns found in the dataset")
+        # Column information
+        with st.expander("📊 Column Information"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.write("**Numeric Columns:**")
+                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                if numeric_cols:
+                    st.write(", ".join(numeric_cols))
+                else:
+                    st.write("None found")
+            
+            with col2:
+                st.write("**Categorical Columns:**")
+                categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+                if categorical_cols:
+                    st.write(", ".join(categorical_cols))
+                else:
+                    st.write("None found")
+            
+            with col3:
+                st.write("**All Columns:**")
+                st.write(", ".join(df.columns.tolist()))
+
+
+def render_configuration_page():
+    """Render the configuration section"""
+    # Initialize session state
+    if 'scenarios_config' not in st.session_state:
+        st.session_state.scenarios_config = []
+    if 'computed_stats' not in st.session_state:
+        st.session_state.computed_stats = None
     
-    st.divider()
+    st.header("⚙️ Configuration")
+    st.markdown("Configure metrics and scenarios with outlier filtering")
     
-    # Section 2: Metrics Selection (shared across all scenarios)
+    if st.session_state.get('uploaded_df') is None:
+        st.warning("⚠️ Please upload data first in the 'Data Upload' tab")
+        return
+    
+    # Section 1: Metrics Selection (shared across all scenarios)
     st.subheader("📊 Select Metrics")
     st.markdown("Select the numeric columns to use as metrics. These will be applied to all scenarios.")
     
-    if st.session_state.uploaded_df is None:
-        st.warning("⚠️ Please upload a CSV file first")
+    from utils.data_filtering import is_id_column
+    
+    numeric_cols = st.session_state.uploaded_df.select_dtypes(include=[np.number]).columns.tolist()
+    # Filter out ID columns
+    numeric_cols = [col for col in numeric_cols if not is_id_column(st.session_state.uploaded_df, col)]
+    
+    if not numeric_cols:
+        st.error("❌ No numeric columns available")
     else:
-        numeric_cols = st.session_state.uploaded_df.select_dtypes(include=[np.number]).columns.tolist()
+        # Initialize selected metrics in session state
+        if 'selected_metrics' not in st.session_state:
+            st.session_state.selected_metrics = []
         
-        if not numeric_cols:
-            st.error("❌ No numeric columns available")
+        # Multi-select for metrics
+        selected_metrics = st.multiselect(
+            "Select Metrics (columns to analyze)",
+            numeric_cols,
+            default=st.session_state.selected_metrics,
+            key="metrics_selector"
+        )
+        st.session_state.selected_metrics = selected_metrics
+        
+        if selected_metrics:
+            st.success(f"✅ {len(selected_metrics)} metric(s) selected: {', '.join(selected_metrics)}")
         else:
-            # Initialize selected metrics in session state
-            if 'selected_metrics' not in st.session_state:
-                st.session_state.selected_metrics = []
-            
-            # Multi-select for metrics
-            selected_metrics = st.multiselect(
-                "Select Metrics (columns to analyze)",
-                numeric_cols,
-                default=st.session_state.selected_metrics,
-                key="metrics_selector"
-            )
-            st.session_state.selected_metrics = selected_metrics
-            
-            if selected_metrics:
-                st.success(f"✅ {len(selected_metrics)} metric(s) selected: {', '.join(selected_metrics)}")
-            else:
-                st.info("💡 Select at least one metric to continue")
+            st.info("💡 Select at least one metric to continue")
     
     st.divider()
     
-    # Section 3: Scenarios Configuration
+    # Section 2: Scenarios Configuration
     st.subheader("⚙️ Configure Scenarios")
     st.markdown("Add scenarios with different outlier filtering methods. All scenarios will use the same metrics selected above.")
     
-    if st.session_state.uploaded_df is None:
-        st.warning("⚠️ Please upload a CSV file first")
-    elif not st.session_state.selected_metrics:
+    if not st.session_state.selected_metrics:
         st.warning("⚠️ Please select at least one metric first")
     else:
         # Add new scenario button
@@ -181,12 +232,10 @@ def render_scenarios_design_page():
     
     st.divider()
     
-    # Section 4: Compute Statistics
+    # Section 3: Compute Statistics
     st.subheader("🔢 Compute Statistics")
     
-    if st.session_state.uploaded_df is None:
-        st.warning("⚠️ Please upload a CSV file first")
-    elif not st.session_state.selected_metrics:
+    if not st.session_state.selected_metrics:
         st.warning("⚠️ Please select at least one metric")
     elif not st.session_state.scenarios_config:
         st.warning("⚠️ Please add at least one scenario")
@@ -220,4 +269,9 @@ def render_scenarios_design_page():
             # Store in session state for auto-fill on Power Analysis page
             st.session_state.generated_json = json_output
             
-            st.success("💡 Statistics are ready! Go to the Power Analysis tab to use them.")
+            st.success("💡 Statistics are ready! Go to the 'Power Analysis' tab to use them.")
+
+
+def render_scenarios_design_page():
+    """Legacy function - kept for backward compatibility, redirects to upload"""
+    render_data_upload()

@@ -4,7 +4,7 @@ UI components for group selection page
 import streamlit as st
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable
 
 # Import filtering utilities
 import sys
@@ -15,86 +15,184 @@ from utils.data_filtering import (
     filter_outliers_percentile,
     filter_outliers_iqr,
     filter_by_value_range,
-    filter_by_categorical_values
+    filter_by_categorical_values,
+    is_id_column
 )
 
 
-def render_data_upload_and_filtering():
-    """Render the data upload and filtering section"""
+def create_streamlit_progress_callback(progress_placeholder, status_placeholder):
+    """
+    Create a progress callback function for Streamlit UI.
+    
+    Parameters:
+    -----------
+    progress_placeholder : streamlit.delta_generator.DeltaGenerator
+        Placeholder for progress bar
+    status_placeholder : streamlit.delta_generator.DeltaGenerator
+        Placeholder for status text
+        
+    Returns:
+    --------
+    Callable: Progress callback function
+    """
+    def callback(stage: str, info: dict):
+        if stage == "start":
+            progress_placeholder.progress(0.0)
+            desc = info.get("description", "Balancing")
+            initial_loss = info.get("initial_loss", 0.0)
+            status_placeholder.info(f"🔄 {desc} - Initial loss: {initial_loss:.4f}")
+        
+        elif stage == "update":
+            iteration = info.get("iteration", 0)
+            total = info.get("total", 1)
+            initial_loss = info.get("initial_loss", 0.0)
+            current_loss = info.get("current_loss", 0.0)
+            gain = info.get("gain", 0.0)
+            progress = info.get("progress", 0.0)
+            
+            progress_placeholder.progress(progress)
+            status_placeholder.info(
+                f"🔄 Iteration {iteration} / {total} | "
+                f"Initial: {initial_loss:.4f} | "
+                f"Current: {current_loss:.4f} | "
+                f"Gain: {gain:.4f}"
+            )
+        
+        elif stage == "complete":
+            progress_placeholder.progress(1.0)
+            final_loss = info.get("final_loss", 0.0)
+            initial_loss = info.get("initial_loss", 0.0)
+            total_gain = info.get("total_gain", 0.0)
+            status_placeholder.success(
+                f"✅ Complete! Final loss: {final_loss:.4f} | "
+                f"Total gain: {total_gain:.4f}"
+            )
+    
+    return callback
+
+
+def render_data_upload():
+    """Render the data upload section"""
     # Initialize session state
     if 'uploaded_data_raw' not in st.session_state:
         st.session_state.uploaded_data_raw = None
-    if 'filtered_data' not in st.session_state:
-        st.session_state.filtered_data = None
     
-    # Section 1: File Upload
     st.header("📤 Upload Data")
+    st.markdown("Upload CSV data for group balancing")
+    
+    # Dummy data loader expander
+    with st.expander("🎲 Load Dummy Data", expanded=False):
+        st.markdown("Load pre-generated sample data for testing")
+        
+        if st.button("🎲 Load Dummy Data", key="group_load_dummy", type="primary"):
+            import os
+            dummy_file = os.path.join("dummy_data", "group_selection_dummy.csv")
+            if os.path.exists(dummy_file):
+                df = pd.read_csv(dummy_file)
+                st.session_state.uploaded_data_raw = df
+                st.session_state.uploaded_filename = "dummy_data.csv"
+                st.success(f"✅ Dummy data loaded! ({len(df)} rows, {len(df.columns)} columns)")
+                st.rerun()
+            else:
+                st.error(f"❌ Dummy data file not found: {dummy_file}")
+                st.info("💡 Run 'python dummy_data_builders/generate_all_dummy_data.py' to generate the files")
     
     uploaded_file = st.file_uploader(
-        "Choose a CSV file",
+        "Or choose a CSV file",
         type=['csv'],
         help="Upload a CSV file with your data for group balancing"
     )
     
+    # Check if we have data (either from upload or dummy)
+    df = None
     if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file)
             st.session_state.uploaded_data_raw = df
             st.session_state.uploaded_filename = uploaded_file.name
-            
             st.success(f"✅ File uploaded successfully! Shape: {df.shape[0]} rows × {df.shape[1]} columns")
-            
-            # Display preview
-            with st.expander("📋 Data Preview", expanded=True):
-                st.dataframe(df.head(20), use_container_width=True)
-                st.caption(f"Showing first 20 rows of {len(df)} total rows")
-            
-            # Display column info
-            with st.expander("📊 Column Information"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write("**Numeric Columns:**")
-                    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-                    if numeric_cols:
-                        st.write(", ".join(numeric_cols))
-                    else:
-                        st.write("None found")
-                
-                with col2:
-                    st.write("**Categorical Columns:**")
-                    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
-                    if categorical_cols:
-                        st.write(", ".join(categorical_cols))
-                    else:
-                        st.write("None found")
-        
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")
             if 'uploaded_data_raw' in st.session_state:
                 del st.session_state.uploaded_data_raw
+            df = None
     
-    st.divider()
+    # Also check if data was loaded from dummy
+    if df is None and st.session_state.uploaded_data_raw is not None:
+        df = st.session_state.uploaded_data_raw
     
-    # Section 2: Data Filtering
-    if st.session_state.uploaded_data_raw is not None:
-        st.header("🔍 Data Filtering")
-        st.markdown("Apply filters to remove outliers or filter by specific values")
+    if df is not None:
+        # Basic statistics
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        with col_stat1:
+            st.metric("Total Rows", f"{len(df):,}")
+        with col_stat2:
+            st.metric("Total Columns", len(df.columns))
+        with col_stat3:
+            numeric_count = len(df.select_dtypes(include=[np.number]).columns)
+            st.metric("Numeric Columns", numeric_count)
         
-        df = st.session_state.uploaded_data_raw.copy()
-        filtered_df = df.copy()
+        # Display preview
+        with st.expander("📋 Data Preview", expanded=True):
+            st.dataframe(df.head(20), use_container_width=True)
+            st.caption(f"Showing first 20 rows of {len(df):,} total rows")
         
-        # Filtering tabs
-        tab_outliers, tab_values = st.tabs(["Outlier Filtering", "Value-Based Filtering"])
-        
-        with tab_outliers:
-            st.subheader("📉 Outlier Filtering")
-            st.markdown("Remove or clip outliers from numeric columns")
+        # Display column info
+        with st.expander("📊 Column Information"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.write("**Numeric Columns:**")
+                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                if numeric_cols:
+                    st.write(", ".join(numeric_cols))
+                else:
+                    st.write("None found")
             
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            with col2:
+                st.write("**Categorical Columns:**")
+                categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+                if categorical_cols:
+                    st.write(", ".join(categorical_cols))
+                else:
+                    st.write("None found")
             
-            if not numeric_cols:
-                st.warning("⚠️ No numeric columns found for outlier filtering")
-            else:
+            with col3:
+                st.write("**All Columns:**")
+                st.write(", ".join(df.columns.tolist()))
+
+
+def render_configuration():
+    """Render the configuration section (filtering and group setup)"""
+    # Initialize session state
+    if 'filtered_data' not in st.session_state:
+        st.session_state.filtered_data = None
+    
+    if st.session_state.get('uploaded_data_raw') is None:
+        st.warning("⚠️ Please upload data first in the 'Data Upload' tab")
+        return
+    
+    st.header("⚙️ Configuration")
+    st.markdown("Apply filters and configure group settings")
+    
+    # Data Filtering Section
+    st.subheader("🔍 Data Filtering")
+    st.markdown("Apply filters to remove outliers or filter by specific values")
+    
+    df = st.session_state.uploaded_data_raw.copy()
+    filtered_df = df.copy()
+    
+    # Filtering tabs
+    tab_outliers, tab_values = st.tabs(["Outlier Filtering", "Value-Based Filtering"])
+    
+    with tab_outliers:
+        st.subheader("📉 Outlier Filtering")
+        st.markdown("Remove or clip outliers from numeric columns")
+        
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if not numeric_cols:
+            st.warning("⚠️ No numeric columns found for outlier filtering")
+        else:
                 # Select column for outlier filtering
                 outlier_column = st.selectbox(
                     "Select Column for Outlier Filtering",
@@ -177,129 +275,144 @@ def render_data_upload_and_filtering():
                     metric_removed_pct = ((metric_total_before - metric_total_after) / metric_total_before * 100) if metric_total_before > 0 else 0
                     
                     st.info(f"📊 Will remove {removed} rows ({removed/rows_before*100:.1f}%) | {metric_removed_pct:.1f}% of total {outlier_column} outside range [{lower_bound:.2f}, {upper_bound:.2f}]")
+    
+    with tab_values:
+        st.subheader("🔢 Value-Based Filtering")
+        st.markdown("Filter rows based on specific column values")
         
-        with tab_values:
-            st.subheader("🔢 Value-Based Filtering")
-            st.markdown("Filter rows based on specific column values")
+        # Numeric value filtering
+        st.markdown("**Numeric Column Filtering:**")
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if numeric_cols:
+            filter_numeric_col = st.selectbox(
+                "Select Numeric Column",
+                options=["None"] + numeric_cols,
+                key="filter_numeric_col"
+            )
             
-            # Numeric value filtering
-            st.markdown("**Numeric Column Filtering:**")
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            if filter_numeric_col != "None":
+                col_v1, col_v2 = st.columns(2)
+                with col_v1:
+                    min_val = st.number_input(
+                        "Minimum Value",
+                        value=None,
+                        key="min_val",
+                        help="Minimum value (inclusive), leave empty for no limit"
+                    )
+                with col_v2:
+                    max_val = st.number_input(
+                        "Maximum Value",
+                        value=None,
+                        key="max_val",
+                        help="Maximum value (inclusive), leave empty for no limit"
+                    )
+                
+                if min_val is not None or max_val is not None:
+                    rows_before = len(filtered_df)
+                    filtered_df = filter_by_value_range(filtered_df, filter_numeric_col, min_val, max_val)
+                    rows_after = len(filtered_df)
+                    removed = rows_before - rows_after
+                    
+                    if removed > 0:
+                        st.info(f"📊 Will remove {removed} rows ({removed/rows_before*100:.1f}%)")
+        
+        # Categorical value filtering
+        st.markdown("**Categorical Column Filtering:**")
+        categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        if categorical_cols:
+            filter_cat_col = st.selectbox(
+                "Select Categorical Column",
+                options=["None"] + categorical_cols,
+                key="filter_cat_col"
+            )
             
-            if numeric_cols:
-                filter_numeric_col = st.selectbox(
-                    "Select Numeric Column",
-                    options=["None"] + numeric_cols,
-                    key="filter_numeric_col"
+            if filter_cat_col != "None":
+                unique_vals = df[filter_cat_col].unique().tolist()
+                
+                filter_mode = st.radio(
+                    "Filter Mode",
+                    options=["Keep selected values", "Exclude selected values"],
+                    key="filter_mode"
                 )
                 
-                if filter_numeric_col != "None":
-                    col_v1, col_v2 = st.columns(2)
-                    with col_v1:
-                        min_val = st.number_input(
-                            "Minimum Value",
-                            value=None,
-                            key="min_val",
-                            help="Minimum value (inclusive), leave empty for no limit"
-                        )
-                    with col_v2:
-                        max_val = st.number_input(
-                            "Maximum Value",
-                            value=None,
-                            key="max_val",
-                            help="Maximum value (inclusive), leave empty for no limit"
-                        )
-                    
-                    if min_val is not None or max_val is not None:
+                if filter_mode == "Keep selected values":
+                    keep_vals = st.multiselect(
+                        "Values to Keep",
+                        options=unique_vals,
+                        key="keep_vals"
+                    )
+                    if keep_vals:
                         rows_before = len(filtered_df)
-                        filtered_df = filter_by_value_range(filtered_df, filter_numeric_col, min_val, max_val)
+                        filtered_df = filter_by_categorical_values(filtered_df, filter_cat_col, keep_values=keep_vals)
                         rows_after = len(filtered_df)
                         removed = rows_before - rows_after
-                        
                         if removed > 0:
                             st.info(f"📊 Will remove {removed} rows ({removed/rows_before*100:.1f}%)")
-            
-            # Categorical value filtering
-            st.markdown("**Categorical Column Filtering:**")
-            categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
-            
-            if categorical_cols:
-                filter_cat_col = st.selectbox(
-                    "Select Categorical Column",
-                    options=["None"] + categorical_cols,
-                    key="filter_cat_col"
-                )
-                
-                if filter_cat_col != "None":
-                    unique_vals = df[filter_cat_col].unique().tolist()
-                    
-                    filter_mode = st.radio(
-                        "Filter Mode",
-                        options=["Keep selected values", "Exclude selected values"],
-                        key="filter_mode"
+                else:
+                    exclude_vals = st.multiselect(
+                        "Values to Exclude",
+                        options=unique_vals,
+                        key="exclude_vals"
                     )
-                    
-                    if filter_mode == "Keep selected values":
-                        keep_vals = st.multiselect(
-                            "Values to Keep",
-                            options=unique_vals,
-                            key="keep_vals"
-                        )
-                        if keep_vals:
-                            rows_before = len(filtered_df)
-                            filtered_df = filter_by_categorical_values(filtered_df, filter_cat_col, keep_values=keep_vals)
-                            rows_after = len(filtered_df)
-                            removed = rows_before - rows_after
-                            if removed > 0:
-                                st.info(f"📊 Will remove {removed} rows ({removed/rows_before*100:.1f}%)")
-                    else:
-                        exclude_vals = st.multiselect(
-                            "Values to Exclude",
-                            options=unique_vals,
-                            key="exclude_vals"
-                        )
-                        if exclude_vals:
-                            rows_before = len(filtered_df)
-                            filtered_df = filter_by_categorical_values(filtered_df, filter_cat_col, exclude_values=exclude_vals)
-                            rows_after = len(filtered_df)
-                            removed = rows_before - rows_after
-                            if removed > 0:
-                                st.info(f"📊 Will remove {removed} rows ({removed/rows_before*100:.1f}%)")
-        
-        # Apply filters button
-        st.divider()
-        
-        col_btn1, col_btn2 = st.columns([1, 3])
-        with col_btn1:
-            if st.button("✅ Apply Filters", type="primary", use_container_width=True):
-                st.session_state.filtered_data = filtered_df
-                st.success(f"✅ Filters applied! {len(df)} → {len(filtered_df)} rows ({len(filtered_df)/len(df)*100:.1f}% retained)")
-                st.rerun()
-        
-        with col_btn2:
-            if st.button("🔄 Reset Filters", use_container_width=True):
-                st.session_state.filtered_data = None
-                st.rerun()
-        
-        # Show filtered data summary
-        if st.session_state.filtered_data is not None:
-            st.subheader("📊 Filtered Data Summary")
-            filtered_df = st.session_state.filtered_data
-            
-            col_sum1, col_sum2, col_sum3 = st.columns(3)
-            with col_sum1:
-                st.metric("Original Rows", f"{len(df):,}")
-            with col_sum2:
-                st.metric("Filtered Rows", f"{len(filtered_df):,}")
-            with col_sum3:
-                removed = len(df) - len(filtered_df)
-                st.metric("Removed", f"{removed:,}", f"-{removed/len(df)*100:.1f}%")
-            
-            with st.expander("📋 Filtered Data Preview"):
-                st.dataframe(filtered_df.head(20), use_container_width=True)
+                    if exclude_vals:
+                        rows_before = len(filtered_df)
+                        filtered_df = filter_by_categorical_values(filtered_df, filter_cat_col, exclude_values=exclude_vals)
+                        rows_after = len(filtered_df)
+                        removed = rows_before - rows_after
+                        if removed > 0:
+                            st.info(f"📊 Will remove {removed} rows ({removed/rows_before*100:.1f}%)")
     
+    # Apply filters button
+    st.divider()
+    
+    col_btn1, col_btn2 = st.columns([1, 3])
+    with col_btn1:
+        if st.button("✅ Apply Filters", type="primary", use_container_width=True):
+            st.session_state.filtered_data = filtered_df
+            st.success(f"✅ Filters applied! {len(df)} → {len(filtered_df)} rows ({len(filtered_df)/len(df)*100:.1f}% retained)")
+            st.rerun()
+    
+    with col_btn2:
+        if st.button("🔄 Reset Filters", use_container_width=True):
+            st.session_state.filtered_data = None
+            st.rerun()
+    
+    # Show filtered data summary
+    if st.session_state.filtered_data is not None:
+        st.subheader("📊 Filtered Data Summary")
+        filtered_df = st.session_state.filtered_data
+        
+        col_sum1, col_sum2, col_sum3 = st.columns(3)
+        with col_sum1:
+            st.metric("Original Rows", f"{len(df):,}")
+        with col_sum2:
+            st.metric("Filtered Rows", f"{len(filtered_df):,}")
+        with col_sum3:
+            removed = len(df) - len(filtered_df)
+            st.metric("Removed", f"{removed:,}", f"-{removed/len(df)*100:.1f}%")
+        
+        with st.expander("📋 Filtered Data Preview"):
+            st.dataframe(filtered_df.head(20), use_container_width=True)
+    
+    st.divider()
+    
+    # # Group Configuration Section
+    # st.subheader("⚙️ Group Configuration")
+    # st.markdown("Configure group names, proportions, and columns for balancing")
+    
+    if st.session_state.filtered_data is not None:
+        df_for_balancing = st.session_state.filtered_data
+    elif st.session_state.uploaded_data_raw is not None:
+        df_for_balancing = st.session_state.uploaded_data_raw
     else:
-        st.info("👆 Please upload a CSV file to begin")
+        st.warning("⚠️ Please upload data and apply filters (if needed) first")
+        return
+    
+    # Group configuration will be handled in render_group_balancing
+    # This section is just a placeholder to show it's part of configuration
+    # st.info("💡 Group configuration (names, proportions, columns) is available in the 'Group Balancing' tab after applying filters")
 
 
 def render_group_balancing():
@@ -314,7 +427,7 @@ def render_group_balancing():
         df = st.session_state.uploaded_data_raw.copy()
         st.info(f"📁 Using uploaded data: {len(df)} rows (no filters applied)")
     else:
-        st.warning("⚠️ Please upload data first in the 'Data Upload & Filtering' tab")
+        st.warning("⚠️ Please upload data first in the 'Data Upload' tab")
         return
     
     # Initialize session state for balancing
@@ -389,8 +502,9 @@ def render_group_balancing():
     with col_config2:
         st.markdown("**Column Selection**")
         
-        # Numeric columns
+        # Numeric columns (exclude ID columns)
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        numeric_cols = [col for col in numeric_cols if not is_id_column(df, col)]
         if numeric_cols:
             value_columns = st.multiselect(
                 "Numeric Columns (for balancing)",
@@ -403,8 +517,9 @@ def render_group_balancing():
             st.warning("⚠️ No numeric columns found in data")
             value_columns = []
         
-        # Categorical columns
+        # Categorical columns (exclude ID columns)
         categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        categorical_cols = [col for col in categorical_cols if not is_id_column(df, col)]
         if categorical_cols:
             strat_columns = st.multiselect(
                 "Categorical Columns (for stratification)",
@@ -726,6 +841,11 @@ def render_group_balancing():
                 if selection_mode == "Advanced":
                     balancer.set_objective(objective)
                     
+                    # Create progress placeholders
+                    progress_placeholder = st.empty()
+                    status_placeholder = st.empty()
+                    progress_callback = create_streamlit_progress_callback(progress_placeholder, status_placeholder)
+                    
                     # Check if batch mode is enabled
                     use_batch = st.session_state.get("balancing_batch_mode", False)
                     
@@ -743,7 +863,8 @@ def render_group_balancing():
                                 n_samples=int(n_samples),
                                 gain_threshold=gain_threshold,
                                 early_break=early_break,
-                                verbose=False
+                                verbose=False,
+                                progress_callback=progress_callback
                             )
                         else:  # Swaps
                             balanced_df = balancer.balance_swap_batch(
@@ -753,7 +874,8 @@ def render_group_balancing():
                                 n_samples=int(n_samples),
                                 gain_threshold=gain_threshold,
                                 early_break=early_break,
-                                verbose=False
+                                verbose=False,
+                                progress_callback=progress_callback
                             )
                     else:
                         # Use single-row methods
@@ -765,7 +887,8 @@ def render_group_balancing():
                                 k_random_candidates=int(k_random_candidates),
                                 gain_threshold=gain_threshold,
                                 early_break=early_break,
-                                verbose=False
+                                verbose=False,
+                                progress_callback=progress_callback
                             )
                         else:  # Swaps
                             balanced_df = balancer.balance_swap(
@@ -775,7 +898,8 @@ def render_group_balancing():
                                 k_random_candidates=int(k_random_candidates),
                                 gain_threshold=gain_threshold,
                                 early_break=early_break,
-                                verbose=False
+                                verbose=False,
+                                progress_callback=progress_callback
                             )
                 
                 # Store results
@@ -1129,15 +1253,31 @@ def render_group_balancing():
                     tmp = balanced_df[[config['group_column'], col]].copy()
                     tmp[col] = tmp[col].fillna("__MISSING__")
                     ct = pd.crosstab(tmp[config['group_column']], tmp[col], normalize="index").fillna(0)
-                    overall = ct.mean(axis=0)
-                    imbalance = (ct.sub(overall, axis=1).abs().sum(axis=1)) * 100
+                    
+                    # Calculate pairwise imbalance matrix
+                    groups = sorted(ct.index.tolist())
+                    n_groups = len(groups)
+                    
+                    if n_groups < 2:
+                        st.info(f"Need at least 2 groups for {col}")
+                        continue
+                    
+                    # Create pairwise imbalance matrix
+                    imbalance_matrix = pd.DataFrame(0.0, index=groups, columns=groups)
+                    
+                    for i, g1 in enumerate(groups):
+                        for j, g2 in enumerate(groups):
+                            if i != j:
+                                # Pairwise difference: |g1_distribution - g2_distribution|.sum() * 100
+                                diff = (ct.loc[g1] - ct.loc[g2]).abs().sum() * 100
+                                imbalance_matrix.loc[g1, g2] = diff
+                    
+                    # Set diagonal to NaN for cleaner display
+                    for g in groups:
+                        imbalance_matrix.loc[g, g] = np.nan
                     
                     st.write(f"**{col}:**")
-                    imbalance_df = pd.DataFrame({
-                        'Group': imbalance.index,
-                        'Total Imbalance (%)': imbalance.values
-                    })
-                    st.dataframe(imbalance_df, use_container_width=True, hide_index=True)
+                    st.dataframe(imbalance_matrix.round(2), use_container_width=True)
         
         else:  # Visual Report
             st.markdown("### 📊 Interactive Balance Report")
@@ -1197,22 +1337,35 @@ def render_group_balancing():
                             numeric_df = pd.DataFrame(all_pairs)
                             numeric_df.to_excel(writer, sheet_name='Numeric Balance', index=False)
                     
-                    # Categorical balance summary
+                    # Categorical balance summary (pairwise matrix)
                     if config['strat_columns']:
                         for col in config['strat_columns']:
                             tmp = balanced_df[[config['group_column'], col]].copy()
                             tmp[col] = tmp[col].fillna("__MISSING__")
                             ct = pd.crosstab(tmp[config['group_column']], tmp[col], normalize="index").fillna(0)
-                            overall = ct.mean(axis=0)
-                            imbalance = (ct.sub(overall, axis=1).abs().sum(axis=1)) * 100
                             
-                            imbalance_df = pd.DataFrame({
-                                'Group': imbalance.index,
-                                'Total Imbalance (%)': imbalance.values
-                            })
-                            # Sanitize sheet name (Excel doesn't allow :, /, \, ?, *, [])
-                            sheet_name = f'Categorical {col[:30]}'.replace(':', '_').replace('/', '_').replace('\\', '_').replace('?', '_').replace('*', '_').replace('[', '_').replace(']', '_')
-                            imbalance_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                            # Calculate pairwise imbalance matrix
+                            groups = sorted(ct.index.tolist())
+                            n_groups = len(groups)
+                            
+                            if n_groups >= 2:
+                                # Create pairwise imbalance matrix
+                                imbalance_matrix = pd.DataFrame(0.0, index=groups, columns=groups)
+                                
+                                for i, g1 in enumerate(groups):
+                                    for j, g2 in enumerate(groups):
+                                        if i != j:
+                                            # Pairwise difference: |g1_distribution - g2_distribution|.sum() * 100
+                                            diff = (ct.loc[g1] - ct.loc[g2]).abs().sum() * 100
+                                            imbalance_matrix.loc[g1, g2] = diff
+                                
+                                # Set diagonal to NaN for cleaner display
+                                for g in groups:
+                                    imbalance_matrix.loc[g, g] = np.nan
+                                
+                                # Sanitize sheet name (Excel doesn't allow :, /, \, ?, *, [])
+                                sheet_name = f'Categorical {col[:30]}'.replace(':', '_').replace('/', '_').replace('\\', '_').replace('?', '_').replace('*', '_').replace('[', '_').replace(']', '_')
+                                imbalance_matrix.to_excel(writer, sheet_name=sheet_name)
                     
                     # Group sizes
                     group_sizes = balanced_df[config['group_column']].value_counts()
