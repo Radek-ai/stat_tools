@@ -229,28 +229,52 @@ if st.session_state.current_page == 'main':
 
 # Power Analysis Page
 elif st.session_state.current_page == 'power_analysis':
-    # Add back button
-    if st.button("← Back to Main", key="back_to_main"):
-        navigate_to('main')
+    # Add back button and download artifact button in same row
+    col_back, col_spacer, col_artifact = st.columns([1, 3, 1])
+    with col_back:
+        if st.button("← Back to Main", key="back_to_main"):
+            navigate_to('main')
+    with col_artifact:
+        # Import here to avoid circular imports
+        from power_analysis.streamlit_page import render_download_artifact_button
+        render_download_artifact_button()
     show_power_analysis_page()
 
 # Group Selection Page
 elif st.session_state.current_page == 'group_selection':
-    # Add back button
-    if st.button("← Back to Main", key="back_to_main_group"):
-        navigate_to('main')
+    # Add back button and download artifact button in same row
+    col_back, col_spacer, col_artifact = st.columns([1, 3, 1])
+    with col_back:
+        if st.button("← Back to Main", key="back_to_main_group"):
+            navigate_to('main')
+    with col_artifact:
+        # Import here to avoid circular imports
+        from group_selection.streamlit_page import render_download_artifact_button
+        render_download_artifact_button()
     show_group_selection_page()
 
 # Rebalancer Page
 elif st.session_state.current_page == 'rebalancer':
-    # Add back button
-    if st.button("← Back to Main", key="back_to_main_rebalancer"):
-        navigate_to('main')
+    # Add back button and download artifact button in same row
+    col_back, col_spacer, col_artifact = st.columns([1, 3, 1])
+    with col_back:
+        if st.button("← Back to Main", key="back_to_main_rebalancer"):
+            navigate_to('main')
+    with col_artifact:
+        # Import here to avoid circular imports
+        from rebalancer.streamlit_page import render_download_artifact_button
+        render_download_artifact_button()
     show_rebalancer_page()
 
 # Results Analysis Page
 elif st.session_state.current_page == 'results_analysis':
-    # Add back button
-    if st.button("← Back to Main", key="back_to_main_results"):
-        navigate_to('main')
+    # Add back button and download artifact button in same row
+    col_back, col_spacer, col_artifact = st.columns([1, 3, 1])
+    with col_back:
+        if st.button("← Back to Main", key="back_to_main_results"):
+            navigate_to('main')
+    with col_artifact:
+        # Import here to avoid circular imports
+        from results_analysis.streamlit_page import render_download_artifact_button
+        render_download_artifact_button()
     show_results_analysis_page()

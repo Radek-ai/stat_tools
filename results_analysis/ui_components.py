@@ -15,6 +15,7 @@ from results_analysis.plots import (
 )
 from power_analysis.components import render_download_button, render_plot_with_download
 from scipy.stats import ttest_ind
+from utils.artifact_builder import ArtifactBuilder
 
 
 def _smd(x1, x2):
@@ -41,6 +42,12 @@ def render_data_upload():
     # Initialize session state
     if 'results_uploaded_data' not in st.session_state:
         st.session_state.results_uploaded_data = None
+    
+    # Initialize artifact builder
+    if 'results_analysis_artifact' not in st.session_state:
+        st.session_state.results_analysis_artifact = ArtifactBuilder(page_name='results_analysis')
+    
+    artifact = st.session_state.results_analysis_artifact
     
     st.header("📤 Upload Experiment Results Data")
     st.markdown("Upload a CSV file containing your experiment results with group assignments and metric values")
@@ -76,6 +83,22 @@ def render_data_upload():
             df = pd.read_csv(uploaded_file)
             st.session_state.results_uploaded_data = df
             st.session_state.results_filename = uploaded_file.name
+            
+            # Add to artifact
+            artifact = st.session_state.get('results_analysis_artifact')
+            if artifact:
+                artifact.add_df('uploaded_data', df, 'Original uploaded data')
+                artifact.add_log(
+                    category='data_upload',
+                    message=f'Data uploaded: {uploaded_file.name}',
+                    details={
+                        'filename': uploaded_file.name,
+                        'rows': len(df),
+                        'columns': len(df.columns),
+                        'column_names': list(df.columns)
+                    }
+                )
+            
             st.success(f"✅ File uploaded successfully! Shape: {df.shape[0]} rows × {df.shape[1]} columns")
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")
@@ -166,6 +189,24 @@ def render_configuration():
         
         # Store groups list (group_column is already stored by the widget with key="results_group_column")
         st.session_state.results_groups = groups
+        
+        # Add configuration to artifact
+        artifact = st.session_state.get('results_analysis_artifact')
+        if artifact:
+            artifact.set_config({
+                'group_column': group_column,
+                'n_groups': n_groups,
+                'group_names': groups
+            })
+            artifact.add_log(
+                category='configuration',
+                message=f'Group column selected: {group_column} with {n_groups} groups',
+                details={
+                    'group_column': group_column,
+                    'groups': groups,
+                    'group_sizes': group_sizes.to_dict()
+                }
+            )
 
 
 def render_basic_analysis():
@@ -227,6 +268,31 @@ def render_basic_analysis():
         return
     
     st.divider()
+    
+    # Always generate the plot for artifact (regardless of view mode)
+    try:
+        fig = create_basic_analysis_plotly(
+            df,
+            value_columns,
+            group_column,
+            title="Basic Treatment Effect Analysis"
+        )
+        
+        # Add plot to artifact
+        artifact = st.session_state.get('results_analysis_artifact')
+        if artifact:
+            artifact.add_plot('basic_analysis', fig, 'Basic treatment effect analysis')
+            artifact.add_log(
+                category='analysis',
+                message='Basic analysis performed',
+                details={
+                    'metrics': value_columns,
+                    'group_column': group_column
+                }
+            )
+    except Exception as e:
+        st.warning(f"Could not generate basic analysis plot: {str(e)}")
+        fig = None
     
     # View switcher
     view_mode = st.radio(
@@ -302,27 +368,17 @@ def render_basic_analysis():
             st.info("ℹ️ No valid data for summary")
     
     else:
-        # Visual report
+        # Visual report - display the plot that was already generated
         st.subheader("📈 Treatment Effect Visualizations")
         
-        try:
-            fig = create_basic_analysis_plotly(
-                df,
-                value_columns,
-                group_column,
-                title="Basic Treatment Effect Analysis"
-            )
-            
+        if fig is not None:
             render_plot_with_download(
                 fig,
                 "basic_analysis_report.html",
                 "Download interactive treatment effect analysis report"
             )
-        except Exception as e:
-            st.error(f"❌ Error generating visualizations: {str(e)}")
-            import traceback
-            with st.expander("Error Details"):
-                st.code(traceback.format_exc())
+        else:
+            st.error("Could not display plot. Please check the error message above.")
 
 
 def render_cuped_analysis():
@@ -400,6 +456,35 @@ def render_cuped_analysis():
         return
     
     st.divider()
+    
+    # Always generate the plot for artifact (regardless of view mode)
+    try:
+        fig = create_cuped_analysis_plotly(
+            df,
+            selected_metrics,
+            group_column,
+            suffix_pre=suffix_pre,
+            suffix_post=suffix_post,
+            title="CUPED-Adjusted Treatment Effect Analysis"
+        )
+        
+        # Add plot to artifact
+        artifact = st.session_state.get('results_analysis_artifact')
+        if artifact:
+            artifact.add_plot('cuped_analysis', fig, 'CUPED-adjusted treatment effect analysis')
+            artifact.add_log(
+                category='analysis',
+                message='CUPED analysis performed',
+                details={
+                    'metrics': selected_metrics,
+                    'group_column': group_column,
+                    'suffix_pre': suffix_pre,
+                    'suffix_post': suffix_post
+                }
+            )
+    except Exception as e:
+        st.warning(f"Could not generate CUPED analysis plot: {str(e)}")
+        fig = None
     
     # View switcher
     view_mode = st.radio(
@@ -484,29 +569,17 @@ def render_cuped_analysis():
             st.info("ℹ️ No valid data for CUPED summary")
     
     else:
-        # Visual report
+        # Visual report - display the plot that was already generated
         st.subheader("📈 CUPED-Adjusted Visualizations")
         
-        try:
-            fig = create_cuped_analysis_plotly(
-                df,
-                selected_metrics,
-                group_column,
-                suffix_pre=suffix_pre,
-                suffix_post=suffix_post,
-                title="CUPED-Adjusted Treatment Effect Analysis"
-            )
-            
+        if fig is not None:
             render_plot_with_download(
                 fig,
                 "cuped_analysis_report.html",
                 "Download interactive CUPED analysis report"
             )
-        except Exception as e:
-            st.error(f"❌ Error generating CUPED visualizations: {str(e)}")
-            import traceback
-            with st.expander("Error Details"):
-                st.code(traceback.format_exc())
+        else:
+            st.error("Could not display plot. Please check the error message above.")
 
 
 def render_did_analysis():
@@ -585,6 +658,35 @@ def render_did_analysis():
     
     st.divider()
     
+    # Always generate the plot for artifact (regardless of view mode)
+    try:
+        fig = create_did_analysis_plotly(
+            df,
+            selected_metrics,
+            group_column,
+            suffix_pre=suffix_pre,
+            suffix_post=suffix_post,
+            title="Difference-in-Differences Analysis"
+        )
+        
+        # Add plot to artifact
+        artifact = st.session_state.get('results_analysis_artifact')
+        if artifact:
+            artifact.add_plot('did_analysis', fig, 'Difference-in-Differences analysis')
+            artifact.add_log(
+                category='analysis',
+                message='DiD analysis performed',
+                details={
+                    'metrics': selected_metrics,
+                    'group_column': group_column,
+                    'suffix_pre': suffix_pre,
+                    'suffix_post': suffix_post
+                }
+            )
+    except Exception as e:
+        st.warning(f"Could not generate DiD analysis plot: {str(e)}")
+        fig = None
+    
     # View switcher
     view_mode = st.radio(
         "View Mode",
@@ -661,26 +763,14 @@ def render_did_analysis():
             st.info("ℹ️ No valid data for DiD summary")
     
     else:
-        # Visual report
+        # Visual report - display the plot that was already generated
         st.subheader("📈 DiD Visualizations")
         
-        try:
-            fig = create_did_analysis_plotly(
-                df,
-                selected_metrics,
-                group_column,
-                suffix_pre=suffix_pre,
-                suffix_post=suffix_post,
-                title="Difference-in-Differences Analysis"
-            )
-            
+        if fig is not None:
             render_plot_with_download(
                 fig,
                 "did_analysis_report.html",
                 "Download interactive DiD analysis report"
             )
-        except Exception as e:
-            st.error(f"❌ Error generating DiD visualizations: {str(e)}")
-            import traceback
-            with st.expander("Error Details"):
-                st.code(traceback.format_exc())
+        else:
+            st.error("Could not display plot. Please check the error message above.")

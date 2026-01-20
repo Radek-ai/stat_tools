@@ -11,6 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.balance_plots import create_balance_report_plotly
 from utils.data_filtering import is_id_column
 from others.multi_rebalancer import MultiGroupRebalancer
+from utils.artifact_builder import ArtifactBuilder
 
 
 def create_streamlit_progress_callback(progress_placeholder, status_placeholder):
@@ -76,6 +77,12 @@ def render_data_upload():
     if 'rebalancer_uploaded_data' not in st.session_state:
         st.session_state.rebalancer_uploaded_data = None
     
+    # Initialize artifact builder
+    if 'rebalancer_artifact' not in st.session_state:
+        st.session_state.rebalancer_artifact = ArtifactBuilder(page_name='rebalancer')
+    
+    artifact = st.session_state.rebalancer_artifact
+    
     st.header("📤 Upload Data with Existing Groups")
     st.markdown("Upload a CSV file that already contains group assignments. The rebalancer will trim rows to improve balance.")
     
@@ -110,6 +117,22 @@ def render_data_upload():
             df = pd.read_csv(uploaded_file)
             st.session_state.rebalancer_uploaded_data = df
             st.session_state.rebalancer_filename = uploaded_file.name
+            
+            # Add to artifact
+            artifact = st.session_state.get('rebalancer_artifact')
+            if artifact:
+                artifact.add_df('uploaded_data', df, 'Original uploaded data')
+                artifact.add_log(
+                    category='data_upload',
+                    message=f'Data uploaded: {uploaded_file.name}',
+                    details={
+                        'filename': uploaded_file.name,
+                        'rows': len(df),
+                        'columns': len(df.columns),
+                        'column_names': list(df.columns)
+                    }
+                )
+            
             st.success(f"✅ File uploaded successfully! Shape: {df.shape[0]} rows × {df.shape[1]} columns")
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")
@@ -413,12 +436,56 @@ def render_configuration():
     with col_btn1:
         if st.button("✅ Apply Filters", type="primary", use_container_width=True, key="rebalancer_apply_filters"):
             st.session_state.rebalancer_filtered_data = filtered_df
+            
+            # Collect filter configuration for artifact
+            filter_config = {}
+            if st.session_state.get('rebalancer_outlier_method') and st.session_state.rebalancer_outlier_method != "None":
+                filter_config['outlier_filtering'] = {
+                    'method': st.session_state.rebalancer_outlier_method,
+                    'column': st.session_state.get('rebalancer_outlier_column'),
+                    'p_low': st.session_state.get('rebalancer_p_low'),
+                    'p_high': st.session_state.get('rebalancer_p_high'),
+                    'iqr_multiplier': st.session_state.get('rebalancer_iqr_multiplier')
+                }
+            if st.session_state.get('rebalancer_filter_numeric_col') and st.session_state.rebalancer_filter_numeric_col != "None":
+                filter_config['numeric_value_filtering'] = {
+                    'column': st.session_state.rebalancer_filter_numeric_col,
+                    'min_value': st.session_state.get('rebalancer_min_val'),
+                    'max_value': st.session_state.get('rebalancer_max_val')
+                }
+            if st.session_state.get('rebalancer_filter_cat_col') and st.session_state.rebalancer_filter_cat_col != "None":
+                filter_config['categorical_filtering'] = {
+                    'column': st.session_state.rebalancer_filter_cat_col,
+                    'mode': st.session_state.get('rebalancer_filter_mode'),
+                    'keep_values': st.session_state.get('rebalancer_keep_vals', []),
+                    'exclude_values': st.session_state.get('rebalancer_exclude_vals', [])
+                }
+            
+            # Add to artifact
+            artifact = st.session_state.get('rebalancer_artifact')
+            if artifact:
+                artifact.add_df('filtered_data', filtered_df, 'Data after applying filters')
+                artifact.add_log(
+                    category='filtering',
+                    message=f'Filters applied: {len(df)} → {len(filtered_df)} rows ({len(filtered_df)/len(df)*100:.1f}% retained)',
+                    details=filter_config,
+                    log_id='current_filters'
+                )
+            
             st.success(f"✅ Filters applied! {len(df)} → {len(filtered_df)} rows ({len(filtered_df)/len(df)*100:.1f}% retained)")
             st.rerun()
     
     with col_btn2:
         if st.button("🔄 Reset Filters", use_container_width=True, key="rebalancer_reset_filters"):
             st.session_state.rebalancer_filtered_data = None
+            
+            # Remove filter logs and filtered data from artifact
+            artifact = st.session_state.get('rebalancer_artifact')
+            if artifact:
+                artifact.remove_log(category='filtering')
+                if 'filtered_data' in artifact.dataframes:
+                    del artifact.dataframes['filtered_data']
+            
             st.rerun()
     
     st.divider()
@@ -672,6 +739,12 @@ def render_rebalancing():
     if 'rebalancing_config' not in st.session_state:
         st.session_state.rebalancing_config = None
     
+    # Get artifact builder
+    artifact = st.session_state.get('rebalancer_artifact')
+    if artifact is None:
+        artifact = ArtifactBuilder(page_name='rebalancer')
+        st.session_state.rebalancer_artifact = artifact
+    
     if st.session_state.get('rebalancer_uploaded_data') is None:
         st.warning("⚠️ Please upload data first in the 'Data Upload' tab")
         return
@@ -893,9 +966,16 @@ def render_rebalancing():
             )
         
         with col_param5:
+            early_break = st.checkbox(
+                "Early Break",
+                value=True,
+                key="rebalancer_early_break",
+                help="Stop searching candidates once a good move is found"
+            )
+            
             enable_seed_search = st.checkbox(
                 "Enable Even Size Seed Search",
-                value=False,
+                value=True,
                 key="rebalancer_enable_seed_search_advanced",
                 help="First subsample all groups to smallest size"
             )
@@ -992,14 +1072,30 @@ def render_rebalancing():
                     max_removals=int(max_removals),
                     top_k_candidates=int(top_k_candidates),
                     k_random_candidates=int(k_random_candidates),
+                    verbose=False,
+                    early_break_regularization=early_break,
                     gain_threshold=gain_threshold,
-                    even_size_seed_trials=even_size_trials if enable_seed_search and not continue_rebalancing else 0,
+                    even_size_seed_trials=int(even_size_trials),
                     continuation=continue_rebalancing,
                     progress_callback=progress_callback
                 )
             
             # Store results
             st.session_state.rebalanced_data = rebalanced_df
+            
+            # Add to artifact
+            artifact = st.session_state.get('rebalancer_artifact')
+            if artifact:
+                artifact.add_df('rebalanced_data', rebalanced_df, 'Final rebalanced groups')
+                artifact.add_log(
+                    category='rebalancing',
+                    message=f'Rebalancing complete: {len(rebalanced_df)} rows in {len(rebalanced_df[group_column].unique())} groups',
+                    details={
+                        'mode': rebalancing_mode,
+                        'n_groups': len(rebalanced_df[group_column].unique()),
+                        'group_names': sorted(rebalanced_df[group_column].unique().tolist())
+                    }
+                )
             
             # Store config (combine loss histories from multiple runs)
             if continue_rebalancing and st.session_state.rebalancing_config:
@@ -1040,6 +1136,23 @@ def render_rebalancing():
                 'middle_group': rebalancer.middle_group if hasattr(rebalancer, 'middle_group') else None,
                 'odd_group': rebalancer.odd_group if hasattr(rebalancer, 'odd_group') else None
             }
+            
+            # Add rebalancing config to artifact
+            artifact = st.session_state.get('rebalancer_artifact')
+            if artifact:
+                artifact.set_config({
+                    'rebalancing_mode': rebalancing_mode,
+                    'group_column': group_column,
+                    'value_columns': value_columns,
+                    'strat_columns': strat_columns,
+                    'objectives': {
+                        'numeric_p_values': numeric_p_values,
+                        'categorical_imbalance': categorical_imbalance
+                    },
+                    'middle_group': rebalancer.middle_group if hasattr(rebalancer, 'middle_group') else None,
+                    'odd_group': rebalancer.odd_group if hasattr(rebalancer, 'odd_group') else None,
+                    'loss_history': loss_history[-10:] if loss_history else []  # Last 10 for summary
+                })
             
             if continue_rebalancing:
                 success_msg = "✅ Additional rebalancing run complete!"
@@ -1326,6 +1439,12 @@ def render_rebalancing():
                 group_column=group_column,
                 title="Rebalanced Group Balance Analysis"
             )
+            
+            # Add plot to artifact
+            artifact = st.session_state.get('rebalancer_artifact')
+            if artifact:
+                artifact.add_plot('balance_report', balance_fig, 'Rebalanced group balance visualization report')
+            
             st.plotly_chart(balance_fig, use_container_width=True)
         
         # Download section
@@ -1382,6 +1501,12 @@ def render_rebalancing():
                     group_column=group_column,
                     title="Rebalanced Group Balance Analysis"
                 )
+                
+                # Add plot to artifact (if not already added)
+                artifact = st.session_state.get('rebalancer_artifact')
+                if artifact and 'balance_report' not in artifact.plots:
+                    artifact.add_plot('balance_report', balance_fig, 'Rebalanced group balance visualization report')
+                
                 html_buffer = balance_fig.to_html(include_plotlyjs='cdn')
                 st.download_button(
                     label="📈 Download Plots (HTML)",

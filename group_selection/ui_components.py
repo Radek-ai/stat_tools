@@ -4,6 +4,7 @@ UI components for group selection page
 import streamlit as st
 import pandas as pd
 import numpy as np
+from utils.artifact_builder import ArtifactBuilder
 from typing import List, Dict, Optional, Callable
 
 # Import filtering utilities
@@ -77,6 +78,12 @@ def render_data_upload():
     if 'uploaded_data_raw' not in st.session_state:
         st.session_state.uploaded_data_raw = None
     
+    # Initialize artifact builder
+    if 'group_selection_artifact' not in st.session_state:
+        st.session_state.group_selection_artifact = ArtifactBuilder(page_name='group_selection')
+    
+    artifact = st.session_state.group_selection_artifact
+    
     st.header("📤 Upload Data")
     st.markdown("Upload CSV data for group balancing")
     
@@ -91,6 +98,19 @@ def render_data_upload():
                 df = pd.read_csv(dummy_file)
                 st.session_state.uploaded_data_raw = df
                 st.session_state.uploaded_filename = "dummy_data.csv"
+                
+                # Add to artifact
+                artifact.add_df('uploaded_data', df, 'Original uploaded data (dummy)')
+                artifact.add_log(
+                    category='data_upload',
+                    message='Dummy data loaded',
+                    details={
+                        'filename': 'dummy_data.csv',
+                        'rows': len(df),
+                        'columns': len(df.columns)
+                    }
+                )
+                
                 st.success(f"✅ Dummy data loaded! ({len(df)} rows, {len(df.columns)} columns)")
                 st.rerun()
             else:
@@ -110,6 +130,20 @@ def render_data_upload():
             df = pd.read_csv(uploaded_file)
             st.session_state.uploaded_data_raw = df
             st.session_state.uploaded_filename = uploaded_file.name
+            
+            # Add to artifact
+            artifact.add_df('uploaded_data', df, 'Original uploaded data')
+            artifact.add_log(
+                category='data_upload',
+                message=f'Data uploaded: {uploaded_file.name}',
+                details={
+                    'filename': uploaded_file.name,
+                    'rows': len(df),
+                    'columns': len(df.columns),
+                    'column_names': list(df.columns)
+                }
+            )
+            
             st.success(f"✅ File uploaded successfully! Shape: {df.shape[0]} rows × {df.shape[1]} columns")
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")
@@ -120,6 +154,18 @@ def render_data_upload():
     # Also check if data was loaded from dummy
     if df is None and st.session_state.uploaded_data_raw is not None:
         df = st.session_state.uploaded_data_raw
+        # Add to artifact if not already added
+        if 'uploaded_data' not in artifact.dataframes:
+            artifact.add_df('uploaded_data', df, 'Original uploaded data (dummy)')
+            artifact.add_log(
+                category='data_upload',
+                message='Dummy data loaded',
+                details={
+                    'filename': st.session_state.get('uploaded_filename', 'dummy_data.csv'),
+                    'rows': len(df),
+                    'columns': len(df.columns)
+                }
+            )
     
     if df is not None:
         # Basic statistics
@@ -166,6 +212,12 @@ def render_configuration():
     # Initialize session state
     if 'filtered_data' not in st.session_state:
         st.session_state.filtered_data = None
+    
+    # Get artifact builder
+    artifact = st.session_state.get('group_selection_artifact')
+    if artifact is None:
+        artifact = ArtifactBuilder(page_name='group_selection')
+        st.session_state.group_selection_artifact = artifact
     
     if st.session_state.get('uploaded_data_raw') is None:
         st.warning("⚠️ Please upload data first in the 'Data Upload' tab")
@@ -371,12 +423,56 @@ def render_configuration():
     with col_btn1:
         if st.button("✅ Apply Filters", type="primary", use_container_width=True):
             st.session_state.filtered_data = filtered_df
+            
+            # Collect filter configuration for artifact
+            filter_config = {}
+            if st.session_state.get('outlier_method') and st.session_state.outlier_method != "None":
+                filter_config['outlier_filtering'] = {
+                    'method': st.session_state.outlier_method,
+                    'column': st.session_state.get('outlier_column'),
+                    'p_low': st.session_state.get('p_low'),
+                    'p_high': st.session_state.get('p_high'),
+                    'iqr_multiplier': st.session_state.get('iqr_multiplier')
+                }
+            if st.session_state.get('filter_numeric_col') and st.session_state.filter_numeric_col != "None":
+                filter_config['numeric_value_filtering'] = {
+                    'column': st.session_state.filter_numeric_col,
+                    'min_value': st.session_state.get('min_val'),
+                    'max_value': st.session_state.get('max_val')
+                }
+            if st.session_state.get('filter_cat_col') and st.session_state.filter_cat_col != "None":
+                filter_config['categorical_filtering'] = {
+                    'column': st.session_state.filter_cat_col,
+                    'mode': st.session_state.get('filter_mode'),
+                    'keep_values': st.session_state.get('keep_vals', []),
+                    'exclude_values': st.session_state.get('exclude_vals', [])
+                }
+            
+            # Add to artifact
+            artifact = st.session_state.get('group_selection_artifact')
+            if artifact:
+                artifact.add_df('filtered_data', filtered_df, 'Data after applying filters')
+                artifact.add_log(
+                    category='filtering',
+                    message=f'Filters applied: {len(df)} → {len(filtered_df)} rows ({len(filtered_df)/len(df)*100:.1f}% retained)',
+                    details=filter_config,
+                    log_id='current_filters'
+                )
+            
             st.success(f"✅ Filters applied! {len(df)} → {len(filtered_df)} rows ({len(filtered_df)/len(df)*100:.1f}% retained)")
             st.rerun()
     
     with col_btn2:
         if st.button("🔄 Reset Filters", use_container_width=True):
             st.session_state.filtered_data = None
+            
+            # Remove filter logs and filtered data from artifact
+            artifact = st.session_state.get('group_selection_artifact')
+            if artifact:
+                artifact.remove_log(category='filtering')
+                if 'filtered_data' in artifact.dataframes:
+                    del artifact.dataframes['filtered_data']
+            
             st.rerun()
     
     # Show filtered data summary
@@ -417,6 +513,12 @@ def render_configuration():
 
 def render_group_balancing():
     """Render the group balancing section"""
+    # Get artifact builder
+    artifact = st.session_state.get('group_selection_artifact')
+    if artifact is None:
+        artifact = ArtifactBuilder(page_name='group_selection')
+        st.session_state.group_selection_artifact = artifact
+    
     st.header("⚖️ Group Balancing")
     
     # Check if we have data
@@ -906,6 +1008,21 @@ def render_group_balancing():
                 st.session_state.balanced_data = balanced_df
                 batch_mode_value = st.session_state.get("balancing_batch_mode", False) if selection_mode == "Advanced" else False
                 
+                # Add to artifact
+                artifact = st.session_state.get('group_selection_artifact')
+                if artifact:
+                    artifact.add_df('balanced_data', balanced_df, 'Final balanced groups')
+                    artifact.add_log(
+                        category='balancing',
+                        message=f'Group balancing complete: {len(balanced_df)} rows assigned to {len(balanced_df[group_column].unique())} groups',
+                        details={
+                            'mode': selection_mode,
+                            'n_groups': len(balanced_df[group_column].unique()),
+                            'group_names': sorted(balanced_df[group_column].unique().tolist()),
+                            'batch_mode': batch_mode_value
+                        }
+                    )
+                
                 # Handle loss history for multiple runs
                 if continue_balancing and selection_mode == "Advanced":
                     # Get existing loss history runs
@@ -949,6 +1066,24 @@ def render_group_balancing():
                     'loss_history': loss_history,  # Combined history for backward compatibility
                     'loss_history_runs': loss_history_runs  # Separate runs for annotations
                 }
+                
+                # Add balancing config to artifact
+                artifact = st.session_state.get('group_selection_artifact')
+                if artifact:
+                    artifact.set_config({
+                        'balancing_mode': selection_mode,
+                        'group_column': group_column,
+                        'n_groups': len(group_names),
+                        'group_names': group_names,
+                        'group_proportions': group_proportions,
+                        'value_columns': value_columns,
+                        'strat_columns': strat_columns,
+                        'objectives': {
+                            'numeric_p_values': numeric_p_values,
+                            'categorical_imbalance': categorical_imbalance
+                        } if selection_mode == "Advanced" else {},
+                        'loss_history': loss_history[-10:] if loss_history else []  # Last 10 for summary
+                    })
                 
                 if continue_balancing:
                     success_msg = "✅ Additional balancing run complete!"
@@ -1191,6 +1326,11 @@ def render_group_balancing():
                 title="Group Balance Analysis Report"
             )
             st.session_state.balance_report_fig = balance_fig
+            
+            # Add plot to artifact
+            artifact = st.session_state.get('group_selection_artifact')
+            if artifact:
+                artifact.add_plot('balance_report', balance_fig, 'Group balance visualization report')
         except Exception as e:
             st.session_state.balance_report_fig = None
             if st.session_state.get('balance_view_mode', 'Summary') == "Visual Report":

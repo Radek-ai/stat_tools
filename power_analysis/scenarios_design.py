@@ -7,6 +7,7 @@ import numpy as np
 import json
 
 from power_analysis.data_processing import compute_all_scenarios
+from utils.artifact_builder import ArtifactBuilder
 
 
 def render_data_upload():
@@ -14,6 +15,12 @@ def render_data_upload():
     # Initialize session state
     if 'uploaded_df' not in st.session_state:
         st.session_state.uploaded_df = None
+    
+    # Initialize artifact builder
+    if 'power_analysis_artifact' not in st.session_state:
+        st.session_state.power_analysis_artifact = ArtifactBuilder(page_name='power_analysis')
+    
+    artifact = st.session_state.power_analysis_artifact
     
     st.header("📤 Upload Data")
     st.markdown("Upload CSV data for power analysis")
@@ -28,6 +35,21 @@ def render_data_upload():
             if os.path.exists(dummy_file):
                 df = pd.read_csv(dummy_file)
                 st.session_state.uploaded_df = df
+                
+                # Add to artifact
+                artifact = st.session_state.get('power_analysis_artifact')
+                if artifact:
+                    artifact.add_df('uploaded_data', df, 'Original uploaded data (dummy)')
+                    artifact.add_log(
+                        category='data_upload',
+                        message='Dummy data loaded',
+                        details={
+                            'filename': 'power_analysis_dummy.csv',
+                            'rows': len(df),
+                            'columns': len(df.columns)
+                        }
+                    )
+                
                 st.success(f"✅ Dummy data loaded! ({len(df)} rows, {len(df.columns)} columns)")
                 st.rerun()
             else:
@@ -43,6 +65,22 @@ def render_data_upload():
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
         st.session_state.uploaded_df = df
+        
+        # Add to artifact
+        artifact = st.session_state.get('power_analysis_artifact')
+        if artifact:
+            artifact.add_df('uploaded_data', df, 'Original uploaded data')
+            artifact.add_log(
+                category='data_upload',
+                message=f'Data uploaded: {uploaded_file.name}',
+                details={
+                    'filename': uploaded_file.name,
+                    'rows': len(df),
+                    'columns': len(df.columns),
+                    'column_names': list(df.columns)
+                }
+            )
+        
         st.success(f"✅ File uploaded successfully! ({len(df)} rows, {len(df.columns)} columns)")
     
     # Show preview if data exists (from dummy or upload)
@@ -258,6 +296,25 @@ def render_configuration_page():
                     scenarios_config_with_metrics
                 )
                 st.session_state.computed_stats = computed_stats
+                
+                # Add computed statistics to artifact
+                artifact = st.session_state.get('power_analysis_artifact')
+                if artifact:
+                    artifact.set_config({
+                        'computed_stats': computed_stats,
+                        'selected_metrics': st.session_state.selected_metrics,
+                        'scenarios_config': st.session_state.scenarios_config
+                    })
+                    artifact.add_log(
+                        category='computation',
+                        message='Statistics computed for all scenario-metric combinations',
+                        details={
+                            'n_scenarios': len(st.session_state.scenarios_config),
+                            'n_metrics': len(st.session_state.selected_metrics),
+                            'total_combinations': len(st.session_state.scenarios_config) * len(st.session_state.selected_metrics)
+                        }
+                    )
+                
                 st.success("✅ Statistics computed successfully!")
         
         # Display computed statistics and JSON
