@@ -29,7 +29,7 @@ if st.session_state.current_page == 'main':
     st.markdown("""
     <div style='text-align: center; padding: 20px 0 30px 0;'>
         <h1 style='color: #1f77b4; margin-bottom: 10px; font-size: 2.5em;'>📊 A/B Testing Experimentation Suite</h1>
-        <p style='color: #666; font-size: 1.1em; margin-top: 0;'>Complete workflow from experiment design to group selection and rebalancing</p>
+        <p style='color: #666; font-size: 1.1em; margin-top: 0;'>Complete workflow from experiment design through group selection to treatment effect analysis rebalancing</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -73,8 +73,7 @@ if st.session_state.current_page == 'main':
                     <li>Test multiple scenarios simultaneously</li>
                     <li>Multi-metric power analysis</li>
                     <li>Fully customizable parameters</li>
-                    <li>Interactive sample size calculator</li>
-                    <li>Advanced contour visualizations</li>
+                    <li>Interactive visualizations</li>
                 </ul>
             </div>
         </div>
@@ -117,7 +116,6 @@ if st.session_state.current_page == 'main':
                     <li>Custom objective-based balancing</li>
                     <li>Multi-group support</li>
                     <li>Sequential moves & swap algorithms</li>
-                    <li>Batch processing modes</li>
                     <li>Data filtering & outlier removal</li>
                     <li>Real-time balance evaluation</li>
                 </ul>
@@ -160,7 +158,6 @@ if st.session_state.current_page == 'main':
                 <ul style='color: #555; font-size: 13px; margin: 0; padding-left: 20px; line-height: 1.9;'>
                     <li>Trim rows from existing groups</li>
                     <li>Preserve original group structure</li>
-                    <li>Even size seed search</li>
                     <li>Iterative rebalancing algorithms</li>
                     <li>Multi-group smart pairing</li>
                     <li>Balance evaluation & visualization</li>
@@ -207,7 +204,6 @@ if st.session_state.current_page == 'main':
                     <li>CUPED adjustment</li>
                     <li>Difference-in-Differences</li>
                     <li>Statistical significance</li>
-                    <li>Interactive visualizations</li>
                 </ul>
             </div>
         </div>
@@ -222,7 +218,7 @@ if st.session_state.current_page == 'main':
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; padding: 20px; color: #888;'>
-        <p style='margin: 5px 0; font-size: 14px;'><strong>Complete A/B Testing Workflow:</strong> Design → Select Groups → Rebalance → Analyze Results</p>
+        <p style='margin: 5px 0; font-size: 14px;'><strong>Complete A/B Testing Workflow:</strong> Design → Select Groups → (Rebalance) → Analyze Results</p>
         <p style='margin: 5px 0; font-size: 12px; color: #aaa;'>Start with Power Analysis to design your experiment, then use Group Selection to create balanced groups</p>
     </div>
     """, unsafe_allow_html=True)
