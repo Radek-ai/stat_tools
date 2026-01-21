@@ -896,7 +896,7 @@ def render_rebalancing():
         with col_param1:
             enable_seed_search = st.checkbox(
                 "Enable Even Size Seed Search",
-                value=True,
+                value=False,
                 key="rebalancer_enable_seed_search",
                 help="Subsample all groups to smallest size, minimizing total loss"
             )
@@ -958,7 +958,7 @@ def render_rebalancing():
                 "Gain Threshold",
                 min_value=0.0,
                 max_value=1.0,
-                value=0.001,
+                value=0.0001,
                 step=0.0001,
                 format="%.4f",
                 key="rebalancer_gain_threshold",
@@ -968,14 +968,14 @@ def render_rebalancing():
         with col_param5:
             early_break = st.checkbox(
                 "Early Break",
-                value=True,
+                value=False,
                 key="rebalancer_early_break",
                 help="Stop searching candidates once a good move is found"
             )
             
             enable_seed_search = st.checkbox(
                 "Enable Even Size Seed Search",
-                value=True,
+                value=False,
                 key="rebalancer_enable_seed_search_advanced",
                 help="First subsample all groups to smallest size"
             )

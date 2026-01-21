@@ -652,18 +652,12 @@ def render_group_balancing():
         st.session_state.balancing_config.get('mode') == "Advanced"
     )
     
-    # Continue balancing checkbox
-    continue_balancing = False
-    if can_continue:
-        continue_balancing = st.checkbox(
-            "🔄 Continue Balancing from Current State",
-            value=False,
-            key="continue_balancing",
-            help="Continue balancing from the previously balanced groups. This will use the current balanced state as the starting point."
-        )
-    
     # Mode Selection
     st.subheader("🎛️ Group Selection Mode")
+    
+    # Check if continuing (read from session state, default to False)
+    # This allows the checkbox (placed later) to affect mode selection
+    continue_balancing = st.session_state.get("continue_balancing", False) if can_continue else False
     
     # If continuing, force Advanced mode
     if continue_balancing:
@@ -898,6 +892,22 @@ def render_group_balancing():
     
     # Run balancing button
     st.divider()
+    
+    # Continue balancing checkbox (placed right before the button, similar to rebalancer)
+    # Note: The checkbox value is read earlier to determine mode, but displayed here for better UX
+    if can_continue:
+        continue_balancing = st.checkbox(
+            "🔄 Continue Balancing from Current State",
+            value=st.session_state.get("continue_balancing", False),
+            key="continue_balancing",
+            help="Continue balancing from the previously balanced groups. This will use the current balanced state as the starting point."
+        )
+        # If checkbox is checked, force Advanced mode (will take effect on next rerun)
+        if continue_balancing:
+            selection_mode = "Advanced"
+    else:
+        continue_balancing = False
+    
     if continue_balancing:
         button_label = "🔄 Continue Balancing"
     else:
