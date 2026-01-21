@@ -8,42 +8,17 @@ from group_selection.ui_components import (
     render_configuration,
     render_group_balancing
 )
-from utils.artifact_builder import ArtifactBuilder
+from utils.streamlit_artifacts import render_download_artifact_button as _render_download_artifact_button
 
 
 def render_download_artifact_button():
     """Render the download artifact button"""
-    # Initialize artifact builder
-    if 'group_selection_artifact' not in st.session_state:
-        st.session_state.group_selection_artifact = ArtifactBuilder(page_name='group_selection')
-    
-    artifact = st.session_state.group_selection_artifact
-    
-    # Check if there's anything to download
-    has_data = len(artifact.dataframes) > 0 or len(artifact.plots) > 0
-    
-    if has_data:
-        try:
-            zip_bytes = artifact.create_zip()
-            st.download_button(
-                label="💾 Download Artifact",
-                data=zip_bytes,
-                file_name=f"artifact_group_selection.zip",
-                mime="application/zip",
-                use_container_width=True,
-                help="Download complete artifact with data, plots, and transformation log"
-            )
-        except Exception as e:
-            st.error(f"Error creating artifact: {str(e)}")
-    else:
-        st.download_button(
-            label="💾 Download Artifact",
-            data=b"",
-            file_name="",
-            disabled=True,
-            use_container_width=True,
-            help="Upload data and perform operations to create an artifact"
-        )
+    _render_download_artifact_button(
+        page_name="group_selection",
+        state_key="group_selection_artifact",
+        file_name="artifact_group_selection.zip",
+        help_disabled="Upload data and perform operations to create an artifact",
+    )
 
 
 def show_group_selection_page():

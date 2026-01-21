@@ -9,14 +9,7 @@ from plotly.subplots import make_subplots
 from typing import List, Optional
 from scipy.stats import ttest_ind
 from utils.data_filtering import is_id_column
-
-
-def _smd(x1, x2):
-    """Calculate Standardized Mean Difference"""
-    if len(x1) < 2 or len(x2) < 2:
-        return np.nan
-    pooled = np.sqrt((x1.var(ddof=1) + x2.var(ddof=1)) / 2)
-    return abs(x1.mean() - x2.mean()) / pooled if pooled else np.nan
+from utils.stats import smd as _smd
 
 
 def _pairwise_matrix(groups, fn):

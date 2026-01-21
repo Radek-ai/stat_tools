@@ -2,39 +2,9 @@
 Shared UI components used across multiple pages
 """
 import streamlit as st
-import plotly.graph_objects as go
 
-
-def render_download_button(fig: go.Figure, filename: str, help_text: str = None):
-    """
-    Render a download button for a Plotly figure.
-    
-    Args:
-        fig: Plotly figure object
-        filename: Name of the file to download
-        help_text: Optional help text for the button
-    """
-    html_buffer = fig.to_html(include_plotlyjs='cdn')
-    st.download_button(
-        label="💾 Download as Interactive HTML",
-        data=html_buffer,
-        file_name=filename,
-        mime="text/html",
-        help=help_text or f"Download this plot as a standalone HTML file with full interactivity"
-    )
-
-
-def render_plot_with_download(fig: go.Figure, filename: str, help_text: str = None):
-    """
-    Render a Plotly figure with download button.
-    
-    Args:
-        fig: Plotly figure object
-        filename: Name of the file to download
-        help_text: Optional help text for the download button
-    """
-    st.plotly_chart(fig, use_container_width=True)
-    render_download_button(fig, filename, help_text)
+# Re-export for backward compatibility (functions moved to utils.streamlit_downloads)
+from utils.streamlit_downloads import render_plot_with_download
 
 
 def render_scenario_selector(scenarios: dict, key: str = "scenario_selector"):

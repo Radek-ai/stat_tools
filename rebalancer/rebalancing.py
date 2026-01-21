@@ -1,0 +1,455 @@
+"""
+Rebalancing logic for rebalancer page.
+"""
+import numpy as np
+import pandas as pd
+import streamlit as st
+from others.multi_rebalancer import MultiGroupRebalancer
+from utils.artifact_builder import ArtifactBuilder
+from utils.data_filtering import is_id_column
+from utils.streamlit_errors import handle_error
+from utils.streamlit_progress import create_streamlit_progress_callback
+
+
+def render_rebalancing():
+    """Render the rebalancing section"""
+    # Initialize session state
+    if 'rebalanced_data' not in st.session_state:
+        st.session_state.rebalanced_data = None
+    if 'rebalancing_config' not in st.session_state:
+        st.session_state.rebalancing_config = None
+    
+    # Get artifact builder
+    artifact = st.session_state.get('rebalancer_artifact')
+    if artifact is None:
+        artifact = ArtifactBuilder(page_name='rebalancer')
+        st.session_state.rebalancer_artifact = artifact
+    
+    if st.session_state.get('rebalancer_uploaded_data') is None:
+        st.warning("⚠️ Please upload data first in the 'Data Upload' tab")
+        return
+    
+    # Use filtered data if available, otherwise use original data
+    if st.session_state.get('rebalancer_filtered_data') is not None:
+        df = st.session_state.rebalancer_filtered_data.copy()
+        st.info(f"📁 Using filtered data: {len(df)} rows")
+    else:
+        df = st.session_state.rebalancer_uploaded_data.copy()
+        st.info(f"📁 Using uploaded data: {len(df)} rows (no filters applied)")
+    
+    # Check if group column is selected
+    if 'rebalancer_upload_group_column' not in st.session_state or not st.session_state.rebalancer_upload_group_column:
+        st.warning("⚠️ Please select a group column in the 'Configuration' tab first")
+        return
+    
+    group_column = st.session_state.rebalancer_upload_group_column
+    groups = sorted(df[group_column].unique())
+    n_groups = len(groups)
+    
+    if n_groups < 2:
+        st.error("❌ Need at least 2 groups for rebalancing")
+        return
+    
+    st.header("⚖️ Rebalancing Configuration")
+    
+    st.info(f"📊 Rebalancing {n_groups} groups: {', '.join(map(str, groups))}")
+    
+    # Show current group sizes
+    group_sizes = df[group_column].value_counts()
+    col_size1, col_size2 = st.columns(2)
+    with col_size1:
+        st.write("**Current Group Sizes:**")
+        for group_name in groups:
+            size = group_sizes.get(group_name, 0)
+            st.metric(str(group_name), f"{size:,}", f"{size/len(df)*100:.1f}%")
+    
+    with col_size2:
+        st.write("**Group Size Statistics:**")
+        sizes_list = [group_sizes.get(g, 0) for g in groups]
+        st.metric("Min Size", f"{min(sizes_list):,}")
+        st.metric("Max Size", f"{max(sizes_list):,}")
+        st.metric("Size Difference", f"{max(sizes_list) - min(sizes_list):,}")
+    
+    st.divider()
+    
+    # Rebalancing mode
+    st.subheader("⚙️ Rebalancing Mode")
+    rebalancing_mode = st.radio(
+        "Select Rebalancing Mode",
+        options=["Basic", "Advanced"],
+        index=1,
+        horizontal=True,
+        key="rebalancing_mode",
+        help="Basic: Even-size seed search. Advanced: Iterative rebalancing with middle/odd group strategy"
+    )
+    
+    # Get columns for balancing (exclude ID columns)
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    
+    # Filter out group column and ID columns
+    numeric_cols = [c for c in numeric_cols if c != group_column and not is_id_column(df, c)]
+    categorical_cols = [c for c in categorical_cols if c != group_column and not is_id_column(df, c)]
+    
+    if not numeric_cols and not categorical_cols:
+        st.error("❌ No valid columns available for balancing (excluding group column)")
+        return
+    
+    st.divider()
+    
+    # Value columns selection
+    st.subheader("📊 Select Value Columns")
+    value_columns = st.multiselect(
+        "Numeric columns to balance",
+        options=numeric_cols,
+        default=numeric_cols[:min(5, len(numeric_cols))] if numeric_cols else [],
+        key="rebalancer_value_columns",
+        help="Select numeric columns to use for balance calculation"
+    )
+    
+    # Stratification columns selection
+    strat_columns = st.multiselect(
+        "Categorical columns to balance",
+        options=categorical_cols,
+        default=categorical_cols[:min(3, len(categorical_cols))] if categorical_cols else [],
+        key="rebalancer_strat_columns",
+        help="Select categorical columns to use for balance calculation"
+    )
+    
+    if not value_columns and not strat_columns:
+        st.warning("⚠️ Please select at least one value or stratification column")
+        return
+    
+    st.divider()
+    
+    # Balancing Objectives
+    st.subheader("🎯 Balancing Objectives")
+    st.markdown("Set target metrics for balancing. The rebalancer will optimize towards these targets.")
+    
+    col_obj1, col_obj2 = st.columns(2)
+    
+    numeric_p_values = {}
+    with col_obj1:
+        st.markdown("**Numeric Balance Targets:**")
+        if value_columns:
+            for col in value_columns:
+                p_val = st.number_input(
+                    f"Target p-value: {col}",
+                    min_value=-1.0,
+                    max_value=1.0,
+                    value=0.95,
+                    step=0.01,
+                    key=f"rebalancer_p_value_{col}",
+                    help="Target p-value for t-test between groups. Use negative value to maximize p-value."
+                )
+                numeric_p_values[col] = p_val
+        else:
+            st.info("No numeric columns selected")
+    
+    categorical_imbalance = {}
+    with col_obj2:
+        st.markdown("**Categorical Balance Targets:**")
+        if strat_columns:
+            for col in strat_columns:
+                imbalance = st.number_input(
+                    f"Max imbalance %: {col}",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=5.0,
+                    step=0.1,
+                    key=f"rebalancer_imbalance_{col}",
+                    help="Maximum allowed total imbalance percentage for this categorical column"
+                )
+                categorical_imbalance[col] = imbalance
+        else:
+            st.info("No categorical columns selected")
+    
+    st.divider()
+    
+    # Rebalancing parameters
+    st.subheader("⚙️ Rebalancing Parameters")
+    
+    if rebalancing_mode == "Basic":
+        # Basic mode: Even-size seed search
+        col_param1, col_param2 = st.columns(2)
+        
+        with col_param1:
+            enable_seed_search = st.checkbox(
+                "Enable Even Size Seed Search",
+                value=False,
+                key="rebalancer_enable_seed_search",
+                help="Subsample all groups to smallest size, minimizing total loss"
+            )
+        
+        with col_param2:
+            if enable_seed_search:
+                even_size_trials = st.number_input(
+                    "Even Size Seed Trials",
+                    min_value=0,
+                    max_value=100000,
+                    value=1000,
+                    step=100,
+                    key="rebalancer_even_size_trials",
+                    help="Number of random seeds to try for even-size subsampling"
+                )
+            else:
+                even_size_trials = 0
+    
+    else:  # Advanced mode
+        col_param1, col_param2, col_param3 = st.columns(3)
+        
+        with col_param1:
+            max_removals = st.number_input(
+                "Max Removals",
+                min_value=1,
+                max_value=10000,
+                value=100,
+                step=10,
+                key="rebalancer_max_removals",
+                help="Maximum number of rows to remove per group"
+            )
+        
+        with col_param2:
+            top_k_candidates = st.number_input(
+                "Top K Candidates",
+                min_value=1,
+                max_value=1000,
+                value=10,
+                step=10,
+                key="rebalancer_top_k",
+                help="Number of top candidates to consider for trimming"
+            )
+        
+        with col_param3:
+            k_random_candidates = st.number_input(
+                "Random Candidates",
+                min_value=0,
+                max_value=10000,
+                value=200,
+                step=10,
+                key="rebalancer_random_candidates",
+                help="Number of random candidates to consider"
+            )
+        
+        col_param4, col_param5 = st.columns(2)
+        
+        with col_param4:
+            gain_threshold = st.number_input(
+                "Gain Threshold",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.0001,
+                step=0.0001,
+                format="%.4f",
+                key="rebalancer_gain_threshold",
+                help="Minimum gain required to make a move"
+            )
+        
+        with col_param5:
+            early_break = st.checkbox(
+                "Early Break",
+                value=False,
+                key="rebalancer_early_break",
+                help="Stop searching candidates once a good move is found"
+            )
+            
+            enable_seed_search = st.checkbox(
+                "Enable Even Size Seed Search",
+                value=False,
+                key="rebalancer_enable_seed_search_advanced",
+                help="First subsample all groups to smallest size"
+            )
+            
+            if enable_seed_search:
+                even_size_trials = st.number_input(
+                    "Even Size Seed Trials",
+                    min_value=0,
+                    max_value=100000,
+                    value=1000,
+                    step=100,
+                    key="rebalancer_even_size_trials_advanced",
+                    help="Number of random seeds to try"
+                )
+            else:
+                even_size_trials = 0
+    
+    # Continue rebalancing option
+    can_continue = (
+        st.session_state.rebalanced_data is not None and 
+        st.session_state.rebalancing_config is not None
+    )
+    
+    continue_rebalancing = False
+    if can_continue:
+        continue_rebalancing = st.checkbox(
+            "🔄 Continue Rebalancing from Current State",
+            value=False,
+            key="rebalancer_continue",
+            help="Continue rebalancing from the previously rebalanced groups. This will use the current rebalanced state as the starting point."
+        )
+    
+    st.divider()
+    
+    # Rebalance button
+    if st.button("⚖️ Start Rebalancing", type="primary", use_container_width=True):
+        try:
+            # If continuing, use existing rebalanced data (skip even-size seed search in Basic mode)
+            if continue_rebalancing:
+                if st.session_state.rebalanced_data is None:
+                    st.error("❌ No previous rebalanced data found. Please run rebalancing first.")
+                    return
+                df_to_use = st.session_state.rebalanced_data.copy()
+                st.info("🔄 Continuing from previous rebalanced state")
+            else:
+                df_to_use = df.copy()
+            
+            # Initialize rebalancer
+            rebalancer = MultiGroupRebalancer(
+                group_column=group_column,
+                value_columns=value_columns,
+                strat_columns=strat_columns
+            )
+            
+            # Set objectives
+            objective = {
+                'numeric_p_value': numeric_p_values,
+                'categorical_total_imbalance': categorical_imbalance
+            }
+            rebalancer.set_objective(objective)
+            
+            # If continuing, restore loss history
+            if continue_rebalancing and st.session_state.rebalancing_config:
+                existing_loss_history = st.session_state.rebalancing_config.get('loss_history', [])
+                if existing_loss_history:
+                    rebalancer.loss_history = existing_loss_history.copy()
+            
+            # Progress tracking
+            progress_placeholder = st.empty()
+            status_placeholder = st.empty()
+            progress_callback = create_streamlit_progress_callback(
+                progress_placeholder,
+                status_placeholder,
+                default_description="Rebalancing",
+                show_step_info=True,
+            )
+            
+            if rebalancing_mode == "Basic":
+                # Basic mode: Even-size seed search only
+                # If continuing, skip even-size search (already done)
+                if continue_rebalancing:
+                    st.info("ℹ️ Skipping even-size seed search in continuation mode. Using current state.")
+                    rebalanced_df = df_to_use.copy()
+                elif even_size_trials > 0:
+                    best_seed_indices = rebalancer.find_best_even_size_seed_multi(
+                        df_to_use,
+                        trials=even_size_trials,
+                        progress_callback=progress_callback
+                    )
+                    # Create rebalanced dataframe with only the selected indices
+                    rebalanced_df = df_to_use.loc[best_seed_indices].copy()
+                else:
+                    st.warning("⚠️ Even size seed search is disabled. No rebalancing performed.")
+                    rebalanced_df = df_to_use.copy()
+            else:
+                # Advanced mode: Full rebalancing
+                rebalanced_df = rebalancer.rebalance_multi_group(
+                    df_to_use,
+                    max_removals=int(max_removals),
+                    top_k_candidates=int(top_k_candidates),
+                    k_random_candidates=int(k_random_candidates),
+                    verbose=False,
+                    early_break_regularization=early_break,
+                    gain_threshold=gain_threshold,
+                    even_size_seed_trials=int(even_size_trials),
+                    continuation=continue_rebalancing,
+                    progress_callback=progress_callback
+                )
+            
+            # Store results
+            st.session_state.rebalanced_data = rebalanced_df
+            
+            # Add to artifact
+            artifact = st.session_state.get('rebalancer_artifact')
+            if artifact:
+                artifact.add_df('rebalanced_data', rebalanced_df, 'Final rebalanced groups')
+                artifact.add_log(
+                    category='rebalancing',
+                    message=f'Rebalancing complete: {len(rebalanced_df)} rows in {len(rebalanced_df[group_column].unique())} groups',
+                    details={
+                        'mode': rebalancing_mode,
+                        'n_groups': len(rebalanced_df[group_column].unique()),
+                        'group_names': sorted(rebalanced_df[group_column].unique().tolist())
+                    }
+                )
+            
+            # Store config (combine loss histories from multiple runs)
+            if continue_rebalancing and st.session_state.rebalancing_config:
+                # Get existing loss history runs
+                existing_config = st.session_state.rebalancing_config
+                existing_loss_runs = existing_config.get('loss_history_runs', [])
+                if not existing_loss_runs:
+                    # If old format, convert single history to list of runs
+                    old_history = existing_config.get('loss_history', [])
+                    if old_history:
+                        existing_loss_runs = [old_history]
+                
+                # Add new run
+                new_run = rebalancer.loss_history if hasattr(rebalancer, 'loss_history') else []
+                if new_run:
+                    existing_loss_runs.append(new_run)
+                
+                # Combine all runs for total history
+                combined_history = []
+                for run in existing_loss_runs:
+                    combined_history.extend(run)
+                
+                loss_history_runs = existing_loss_runs
+                loss_history = combined_history
+            else:
+                # First run
+                new_run = rebalancer.loss_history if hasattr(rebalancer, 'loss_history') else []
+                loss_history_runs = [new_run] if new_run else []
+                loss_history = new_run
+            
+            st.session_state.rebalancing_config = {
+                'group_column': group_column,
+                'value_columns': value_columns,
+                'strat_columns': strat_columns,
+                'mode': rebalancing_mode,
+                'loss_history': loss_history,  # Combined history for backward compatibility
+                'loss_history_runs': loss_history_runs,  # Separate runs for annotations
+                'middle_group': rebalancer.middle_group if hasattr(rebalancer, 'middle_group') else None,
+                'odd_group': rebalancer.odd_group if hasattr(rebalancer, 'odd_group') else None
+            }
+            
+            # Add rebalancing config to artifact
+            artifact = st.session_state.get('rebalancer_artifact')
+            if artifact:
+                artifact.set_config({
+                    'rebalancing_mode': rebalancing_mode,
+                    'group_column': group_column,
+                    'value_columns': value_columns,
+                    'strat_columns': strat_columns,
+                    'objectives': {
+                        'numeric_p_values': numeric_p_values,
+                        'categorical_imbalance': categorical_imbalance
+                    },
+                    'middle_group': rebalancer.middle_group if hasattr(rebalancer, 'middle_group') else None,
+                    'odd_group': rebalancer.odd_group if hasattr(rebalancer, 'odd_group') else None,
+                    'loss_history': loss_history[-10:] if loss_history else []  # Last 10 for summary
+                })
+            
+            if continue_rebalancing:
+                success_msg = "✅ Additional rebalancing run complete!"
+            else:
+                success_msg = "✅ Even size search complete!" if rebalancing_mode == "Basic" else "✅ Rebalancing complete!"
+            st.success(success_msg)
+            st.rerun()
+            
+        except Exception as e:
+            handle_error(e, "Error during rebalancing")
+    
+    # Show results if available
+    if st.session_state.rebalanced_data is not None:
+        from rebalancer.results import render_rebalancing_results
+        render_rebalancing_results(df, group_column, groups)

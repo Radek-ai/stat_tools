@@ -86,13 +86,13 @@ def render_configuration_section():
             power_min = st.number_input("Min Power", value=0.6, format="%.2f", key="power_min")
         
         with col_b:
-            uplift_max = st.number_input("Max Uplift", value=0.15, format="%.4f", key="uplift_max")
+            uplift_max = st.number_input("Max Uplift", value=0.1, format="%.4f", key="uplift_max")
             alpha_max = st.number_input("Max Alpha", value=0.4, format="%.3f", key="alpha_max")
             power_max = st.number_input("Max Power", value=0.9, format="%.2f", key="power_max")
         
         col_c, col_d, col_e = st.columns(3)
         with col_c:
-            uplift_points = st.number_input("Uplift Points", value=16, min_value=10, max_value=100, key="uplift_points")
+            uplift_points = st.number_input("Uplift Points", value=19, min_value=10, max_value=100, key="uplift_points")
         with col_d:
             alpha_points = st.number_input("Alpha Points", value=16, min_value=10, max_value=100, key="alpha_points")
         with col_e:

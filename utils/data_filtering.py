@@ -157,24 +157,7 @@ def filter_by_categorical_values(df: pd.DataFrame, column: str, keep_values: Lis
     return filtered_df
 
 
-def winsorize_percentile(df: pd.DataFrame, column: str, p_low: float, p_high: float) -> pd.DataFrame:
-    """
-    Winsorize (clip) outliers using percentile-based method.
-    Values outside [p_low, p_high] percentiles are clipped to those boundaries.
-    
-    Args:
-        df: Input dataframe
-        column: Column name to process
-        p_low: Lower percentile (0-100)
-        p_high: Upper percentile (0-100)
-        
-    Returns:
-        Dataframe with clipped values (same number of rows)
-    """
-    df = df.copy()
-    lower_bound = df[column].quantile(p_low / 100.0)
-    upper_bound = df[column].quantile(p_high / 100.0)
-    
-    # Clip values to boundaries
-    df[column] = df[column].clip(lower=lower_bound, upper=upper_bound)
-    return df
+#
+# NOTE: `winsorize_percentile` is intentionally defined once (above).
+# The duplicate definition that previously existed here was removed to prevent
+# accidental divergence and to keep a single source of truth.

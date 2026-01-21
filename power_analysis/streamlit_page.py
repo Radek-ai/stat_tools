@@ -25,42 +25,17 @@ from power_analysis.components import (
     render_validation_message
 )
 from power_analysis.scenarios_design import render_data_upload, render_configuration_page
-from utils.artifact_builder import ArtifactBuilder
+from utils.streamlit_artifacts import render_download_artifact_button as _render_download_artifact_button
 
 
 def render_download_artifact_button():
     """Render the download artifact button"""
-    # Initialize artifact builder
-    if 'power_analysis_artifact' not in st.session_state:
-        st.session_state.power_analysis_artifact = ArtifactBuilder(page_name='power_analysis')
-    
-    artifact = st.session_state.power_analysis_artifact
-    
-    # Check if there's anything to download
-    has_data = len(artifact.dataframes) > 0 or len(artifact.plots) > 0
-    
-    if has_data:
-        try:
-            zip_bytes = artifact.create_zip()
-            st.download_button(
-                label="💾 Download Artifact",
-                data=zip_bytes,
-                file_name=f"artifact_power_analysis.zip",
-                mime="application/zip",
-                use_container_width=True,
-                help="Download complete artifact with data, plots, and transformation log"
-            )
-        except Exception as e:
-            st.error(f"Error creating artifact: {str(e)}")
-    else:
-        st.download_button(
-            label="💾 Download Artifact",
-            data=b"",
-            file_name="",
-            disabled=True,
-            use_container_width=True,
-            help="Upload data and perform analysis to create an artifact"
-        )
+    _render_download_artifact_button(
+        page_name="power_analysis",
+        state_key="power_analysis_artifact",
+        file_name="artifact_power_analysis.zip",
+        help_disabled="Upload data and perform analysis to create an artifact",
+    )
 
 
 def show_power_analysis_page():
@@ -111,8 +86,12 @@ def show_power_analysis_page():
             # Store in session state
             st.session_state.computed_data = computed_data
             
-            # Add computation to artifact
-            artifact = st.session_state.get('power_analysis_artifact')
+            # Ensure artifact is initialized
+            if "power_analysis_artifact" not in st.session_state:
+                from utils.artifact_builder import ArtifactBuilder
+                st.session_state.power_analysis_artifact = ArtifactBuilder(page_name="power_analysis")
+            
+            artifact = st.session_state.power_analysis_artifact
             if artifact:
                 artifact.set_config({
                     'ttest_type': config['ttest_type'],
@@ -161,14 +140,8 @@ def show_power_analysis_page():
                         artifact.add_plot(plot_config["name"], fig, plot_config["description"])
                         plots_generated.append(plot_config["name"])
                     except Exception as e:
-                        import traceback
-                        st.warning(f"Could not generate {plot_config['name']}: {str(e)}")
-                        st.error(f"Traceback: {traceback.format_exc()}")
+                        handle_plot_error(plot_config['name'], e)
                 
-                if len(plots_generated) == 3:
-                    st.success(f"✅ Generated all 3 single plots: {', '.join(plots_generated)}")
-                else:
-                    st.warning(f"⚠️ Only generated {len(plots_generated)}/3 single plots: {', '.join(plots_generated)}")
                 
                 # Contour plots
                 contour_plot_configs = [
@@ -189,6 +162,7 @@ def show_power_analysis_page():
                     }
                 ]
                 
+                contour_plots_generated = []
                 for plot_config in contour_plot_configs:
                     try:
                         fig = plot_config["function"](
@@ -198,10 +172,15 @@ def show_power_analysis_page():
                             n_groups=config.get('n_groups', 2)
                         )
                         artifact.add_plot(plot_config["name"], fig, plot_config["description"])
+                        contour_plots_generated.append(plot_config["name"])
                     except Exception as e:
-                        st.warning(f"Could not generate {plot_config['name']}: {str(e)}")
+                        handle_plot_error(plot_config['name'], e)
+                
+                # Summary message for all plots
+                total_plots = len(plots_generated) + len(contour_plots_generated)
+
             
-            st.success(f"✅ Computation complete! Using **{config['ttest_type']}** t-test")
+            # st.success(f"✅ Computation complete! Using **{config['ttest_type']}** t-test")
         
         # Display current settings if data is computed
         if st.session_state.computed_data:
@@ -285,14 +264,7 @@ def show_power_analysis_page():
                     data['Z_scenarios'], data['scenarios'], data['max_sample_size']
                 )
                 
-                # Add plot to artifact (only if not already added during computation)
-                artifact = st.session_state.get('power_analysis_artifact')
-                if artifact:
-                    plot_name = plot_config["filename"].replace('.html', '')
-                    # Only add if not already in artifact (to avoid overwriting)
-                    if plot_name not in artifact.plots:
-                        artifact.add_plot(plot_name, fig, f'Single plot: {plot_type}')
-                
+                # Plots are already added to artifact during computation, just render
                 render_plot_with_download(fig, plot_config["filename"])
 
         # Tab 3: Contour Maps
@@ -337,12 +309,7 @@ def show_power_analysis_page():
                             n_groups=config['n_groups']
                         )
                         
-                        # Add plot to artifact
-                        artifact = st.session_state.get('power_analysis_artifact')
-                        if artifact:
-                            plot_name = plot_config["filename"].replace('.html', '').replace('_', '_')
-                            artifact.add_plot(plot_name, fig, f'Contour plot: {plot_config["title"]}')
-                        
+                        # Plots are already added to artifact during computation, just render
                         render_plot_with_download(fig, plot_config["filename"])
 
         # Tab 4: Instructions

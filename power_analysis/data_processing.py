@@ -6,9 +6,6 @@ import numpy as np
 from typing import Dict, List, Tuple
 
 # Import shared filtering utilities
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.data_filtering import (
     remove_nans,
     filter_outliers_percentile,

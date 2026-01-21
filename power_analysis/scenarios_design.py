@@ -5,125 +5,36 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import json
+import os
 
 from power_analysis.data_processing import compute_all_scenarios
 from utils.artifact_builder import ArtifactBuilder
+from utils.streamlit_upload import render_csv_upload_with_dummy
 
 
 def render_data_upload():
     """Render the data upload section"""
-    # Initialize session state
-    if 'uploaded_df' not in st.session_state:
-        st.session_state.uploaded_df = None
-    
     # Initialize artifact builder
-    if 'power_analysis_artifact' not in st.session_state:
-        st.session_state.power_analysis_artifact = ArtifactBuilder(page_name='power_analysis')
-    
-    artifact = st.session_state.power_analysis_artifact
-    
-    st.header("📤 Upload Data")
-    st.markdown("Upload CSV data for power analysis")
-    
-    # Dummy data loader expander
-    with st.expander("🎲 Load Dummy Data", expanded=False):
-        st.markdown("Load pre-generated sample data for testing")
-        
-        if st.button("🎲 Load Dummy Data", key="power_load_dummy", type="primary"):
-            import os
-            dummy_file = os.path.join("dummy_data", "power_analysis_dummy.csv")
-            if os.path.exists(dummy_file):
-                df = pd.read_csv(dummy_file)
-                st.session_state.uploaded_df = df
-                
-                # Add to artifact
-                artifact = st.session_state.get('power_analysis_artifact')
-                if artifact:
-                    artifact.add_df('uploaded_data', df, 'Original uploaded data (dummy)')
-                    artifact.add_log(
-                        category='data_upload',
-                        message='Dummy data loaded',
-                        details={
-                            'filename': 'power_analysis_dummy.csv',
-                            'rows': len(df),
-                            'columns': len(df.columns)
-                        }
-                    )
-                
-                st.success(f"✅ Dummy data loaded! ({len(df)} rows, {len(df.columns)} columns)")
-                st.rerun()
-            else:
-                st.error(f"❌ Dummy data file not found: {dummy_file}")
-                st.info("💡 Run 'python dummy_data_builders/generate_all_dummy_data.py' to generate the files")
-    
-    uploaded_file = st.file_uploader(
-        "Or upload CSV file",
-        type=['csv'],
-        key="csv_uploader"
+    if "power_analysis_artifact" not in st.session_state:
+        st.session_state.power_analysis_artifact = ArtifactBuilder(page_name="power_analysis")
+
+    render_csv_upload_with_dummy(
+        header="📤 Upload Data",
+        description="Upload CSV data for power analysis",
+        data_state_key="uploaded_df",
+        filename_state_key=None,
+        uploader_label="Or upload CSV file",
+        uploader_key="csv_uploader",
+        uploader_help=None,
+        dummy_file_path=os.path.join("dummy_data", "power_analysis_dummy.csv"),
+        dummy_button_key="power_load_dummy",
+        dummy_loaded_filename="power_analysis_dummy.csv",
+        artifact=st.session_state.power_analysis_artifact,
+        artifact_df_name="uploaded_data",
+        artifact_df_description="Original uploaded data",
+        artifact_log_category="data_upload",
+        show_overview=True,
     )
-    
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        st.session_state.uploaded_df = df
-        
-        # Add to artifact
-        artifact = st.session_state.get('power_analysis_artifact')
-        if artifact:
-            artifact.add_df('uploaded_data', df, 'Original uploaded data')
-            artifact.add_log(
-                category='data_upload',
-                message=f'Data uploaded: {uploaded_file.name}',
-                details={
-                    'filename': uploaded_file.name,
-                    'rows': len(df),
-                    'columns': len(df.columns),
-                    'column_names': list(df.columns)
-                }
-            )
-        
-        st.success(f"✅ File uploaded successfully! ({len(df)} rows, {len(df.columns)} columns)")
-    
-    # Show preview if data exists (from dummy or upload)
-    if st.session_state.uploaded_df is not None:
-        df = st.session_state.uploaded_df
-        
-        # Basic statistics
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
-        with col_stat1:
-            st.metric("Total Rows", f"{len(df):,}")
-        with col_stat2:
-            st.metric("Total Columns", len(df.columns))
-        with col_stat3:
-            numeric_count = len(df.select_dtypes(include=[np.number]).columns)
-            st.metric("Numeric Columns", numeric_count)
-        
-        # Show preview
-        with st.expander("📋 Data Preview", expanded=True):
-            st.dataframe(df.head(20), use_container_width=True)
-            st.caption(f"Showing first 20 rows of {len(df):,} total rows")
-        
-        # Column information
-        with st.expander("📊 Column Information"):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.write("**Numeric Columns:**")
-                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-                if numeric_cols:
-                    st.write(", ".join(numeric_cols))
-                else:
-                    st.write("None found")
-            
-            with col2:
-                st.write("**Categorical Columns:**")
-                categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
-                if categorical_cols:
-                    st.write(", ".join(categorical_cols))
-                else:
-                    st.write("None found")
-            
-            with col3:
-                st.write("**All Columns:**")
-                st.write(", ".join(df.columns.tolist()))
 
 
 def render_configuration_page():

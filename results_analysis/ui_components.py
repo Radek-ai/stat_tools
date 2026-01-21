@@ -4,153 +4,43 @@ UI components for results analysis page
 import streamlit as st
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Optional
-import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from results_analysis.plots import (
     create_basic_analysis_plotly,
     create_cuped_analysis_plotly,
     create_did_analysis_plotly
 )
-from power_analysis.components import render_download_button, render_plot_with_download
+from utils.streamlit_downloads import render_download_button, render_plot_with_download
 from scipy.stats import ttest_ind
 from utils.artifact_builder import ArtifactBuilder
-
-
-def _smd(x1, x2):
-    """Calculate Standardized Mean Difference"""
-    if len(x1) < 2 or len(x2) < 2:
-        return np.nan
-    pooled = np.sqrt((x1.var(ddof=1) + x2.var(ddof=1)) / 2)
-    return abs(x1.mean() - x2.mean()) / pooled if pooled else np.nan
-
-
-def _cuped_adjust(pre, post):
-    """CUPED adjustment"""
-    X = pre.values
-    Y = post.values
-    var_x = np.var(X, ddof=1)
-    if var_x == 0:
-        return None
-    theta = np.cov(Y, X, ddof=1)[0, 1] / var_x
-    return post - theta * (pre - X.mean())
-
+from utils.stats import smd as _smd, cuped_adjust as _cuped_adjust
+from utils.streamlit_upload import render_csv_upload_with_dummy
+from utils.streamlit_validation import validate_data_and_group
+from utils.streamlit_errors import handle_plot_error
 
 def render_data_upload():
     """Render the data upload section"""
-    # Initialize session state
-    if 'results_uploaded_data' not in st.session_state:
-        st.session_state.results_uploaded_data = None
-    
     # Initialize artifact builder
-    if 'results_analysis_artifact' not in st.session_state:
-        st.session_state.results_analysis_artifact = ArtifactBuilder(page_name='results_analysis')
-    
-    artifact = st.session_state.results_analysis_artifact
-    
-    st.header("📤 Upload Experiment Results Data")
-    st.markdown("Upload a CSV file containing your experiment results with group assignments and metric values")
-    
-    # Dummy data loader expander
-    with st.expander("🎲 Load Dummy Data", expanded=False):
-        st.markdown("Load pre-generated sample experiment results data for testing")
-        
-        if st.button("🎲 Load Dummy Data", key="results_load_dummy", type="primary"):
-            import os
-            dummy_file = os.path.join("dummy_data", "results_analysis_dummy.csv")
-            if os.path.exists(dummy_file):
-                df = pd.read_csv(dummy_file)
-                st.session_state.results_uploaded_data = df
-                st.session_state.results_filename = "dummy_results_data.csv"
-                st.success(f"✅ Dummy data loaded! ({len(df)} rows, {len(df.columns)} columns)")
-                st.rerun()
-            else:
-                st.error(f"❌ Dummy data file not found: {dummy_file}")
-                st.info("💡 Run 'python dummy_data_builders/generate_all_dummy_data.py' to generate the files")
-    
-    uploaded_file = st.file_uploader(
-        "Or choose a CSV file",
-        type=['csv'],
-        key="results_file_upload",
-        help="Upload a CSV file with experiment results"
+    if "results_analysis_artifact" not in st.session_state:
+        st.session_state.results_analysis_artifact = ArtifactBuilder(page_name="results_analysis")
+
+    render_csv_upload_with_dummy(
+        header="📤 Upload Experiment Results Data",
+        description="Upload a CSV file containing your experiment results with group assignments and metric values",
+        data_state_key="results_uploaded_data",
+        filename_state_key="results_filename",
+        uploader_label="Or choose a CSV file",
+        uploader_key="results_file_upload",
+        uploader_help="Upload a CSV file with experiment results",
+        dummy_file_path=os.path.join("dummy_data", "results_analysis_dummy.csv"),
+        dummy_button_key="results_load_dummy",
+        dummy_loaded_filename="dummy_results_data.csv",
+        artifact=st.session_state.results_analysis_artifact,
+        artifact_df_name="uploaded_data",
+        artifact_df_description="Original uploaded data",
+        artifact_log_category="data_upload",
+        show_overview=True,
     )
-    
-    # Check if we have data (either from upload or dummy)
-    df = None
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            st.session_state.results_uploaded_data = df
-            st.session_state.results_filename = uploaded_file.name
-            
-            # Add to artifact
-            artifact = st.session_state.get('results_analysis_artifact')
-            if artifact:
-                artifact.add_df('uploaded_data', df, 'Original uploaded data')
-                artifact.add_log(
-                    category='data_upload',
-                    message=f'Data uploaded: {uploaded_file.name}',
-                    details={
-                        'filename': uploaded_file.name,
-                        'rows': len(df),
-                        'columns': len(df.columns),
-                        'column_names': list(df.columns)
-                    }
-                )
-            
-            st.success(f"✅ File uploaded successfully! Shape: {df.shape[0]} rows × {df.shape[1]} columns")
-        except Exception as e:
-            st.error(f"❌ Error reading file: {str(e)}")
-            df = None
-    
-    # Also check if data was loaded from dummy
-    if df is None and st.session_state.results_uploaded_data is not None:
-        df = st.session_state.results_uploaded_data
-        if 'results_filename' not in st.session_state:
-            st.session_state.results_filename = "dummy_results_data.csv"
-    
-    if df is not None:
-        # Basic statistics
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
-        with col_stat1:
-            st.metric("Total Rows", f"{len(df):,}")
-        with col_stat2:
-            st.metric("Total Columns", len(df.columns))
-        with col_stat3:
-            numeric_count = len(df.select_dtypes(include=[np.number]).columns)
-            st.metric("Numeric Columns", numeric_count)
-        
-        # Display preview
-        with st.expander("📋 Data Preview", expanded=True):
-            preview_df = df.head(20).copy()
-            st.dataframe(preview_df, use_container_width=True)
-            st.caption(f"Showing first 20 rows of {len(df):,} total rows")
-        
-        # Display column info
-        with st.expander("📊 Column Information"):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.write("**Numeric Columns:**")
-                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-                if numeric_cols:
-                    st.write(", ".join(numeric_cols))
-                else:
-                    st.write("None found")
-            
-            with col2:
-                st.write("**Categorical Columns:**")
-                categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
-                if categorical_cols:
-                    st.write(", ".join(categorical_cols))
-                else:
-                    st.write("None found")
-            
-            with col3:
-                st.write("**All Columns:**")
-                st.write(", ".join(df.columns.tolist()))
-    elif st.session_state.results_uploaded_data is None:
-        st.info("ℹ️ Please upload a CSV file or load dummy data to begin analysis")
 
 
 def render_configuration():
@@ -215,17 +105,13 @@ def render_basic_analysis():
     st.markdown("Analyze treatment effects, uplifts, and statistical significance")
     
     # Check if data is available
-    if 'results_uploaded_data' not in st.session_state or st.session_state.results_uploaded_data is None:
-        st.warning("⚠️ Please upload data first in the 'Data Upload' tab")
+    is_valid, df, group_column = validate_data_and_group(
+        'results_uploaded_data',
+        'results_group_column'
+    )
+    if not is_valid:
         return
     
-    df = st.session_state.results_uploaded_data.copy()
-    
-    if 'results_group_column' not in st.session_state or not st.session_state.results_group_column:
-        st.warning("⚠️ Please select a group column in the 'Configuration' tab")
-        return
-    
-    group_column = st.session_state.results_group_column
     groups = st.session_state.results_groups
     
     st.divider()
@@ -291,7 +177,7 @@ def render_basic_analysis():
                 }
             )
     except Exception as e:
-        st.warning(f"Could not generate basic analysis plot: {str(e)}")
+        handle_plot_error('basic analysis plot', e)
         fig = None
     
     # View switcher
@@ -387,17 +273,13 @@ def render_cuped_analysis():
     st.markdown("Analyze treatment effects using CUPED (Controlled-experiment Using Pre-Experiment Data) adjustment")
     
     # Check if data is available
-    if 'results_uploaded_data' not in st.session_state or st.session_state.results_uploaded_data is None:
-        st.warning("⚠️ Please upload data first in the 'Data Upload' tab")
+    is_valid, df, group_column = validate_data_and_group(
+        'results_uploaded_data',
+        'results_group_column'
+    )
+    if not is_valid:
         return
     
-    df = st.session_state.results_uploaded_data.copy()
-    
-    if 'results_group_column' not in st.session_state or not st.session_state.results_group_column:
-        st.warning("⚠️ Please select a group column in the 'Configuration' tab")
-        return
-    
-    group_column = st.session_state.results_group_column
     groups = st.session_state.results_groups
     
     st.divider()
@@ -483,7 +365,7 @@ def render_cuped_analysis():
                 }
             )
     except Exception as e:
-        st.warning(f"Could not generate CUPED analysis plot: {str(e)}")
+        handle_plot_error('CUPED analysis plot', e)
         fig = None
     
     # View switcher
@@ -588,17 +470,13 @@ def render_did_analysis():
     st.markdown("Analyze treatment effects using Difference-in-Differences (DiD) methodology")
     
     # Check if data is available
-    if 'results_uploaded_data' not in st.session_state or st.session_state.results_uploaded_data is None:
-        st.warning("⚠️ Please upload data first in the 'Data Upload' tab")
+    is_valid, df, group_column = validate_data_and_group(
+        'results_uploaded_data',
+        'results_group_column'
+    )
+    if not is_valid:
         return
     
-    df = st.session_state.results_uploaded_data.copy()
-    
-    if 'results_group_column' not in st.session_state or not st.session_state.results_group_column:
-        st.warning("⚠️ Please select a group column in the 'Configuration' tab")
-        return
-    
-    group_column = st.session_state.results_group_column
     groups = st.session_state.results_groups
     
     st.divider()
@@ -684,7 +562,7 @@ def render_did_analysis():
                 }
             )
     except Exception as e:
-        st.warning(f"Could not generate DiD analysis plot: {str(e)}")
+        handle_plot_error('DiD analysis plot', e)
         fig = None
     
     # View switcher

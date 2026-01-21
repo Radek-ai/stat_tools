@@ -10,7 +10,7 @@ from dummy_data_builders.rebalancer_builder import generate_rebalancer_data
 from dummy_data_builders.results_analysis_builder import generate_results_analysis_data
 def run_data():
     # Create output directory
-    output_dir = "dummy_data"
+    output_dir = "dummy_data2"
     os.makedirs(output_dir, exist_ok=True)
 
     print("🎲 Generating dummy data files...\n")

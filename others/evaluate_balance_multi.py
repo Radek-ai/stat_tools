@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from itertools import combinations
 from typing import List
 from scipy.stats import ttest_ind
+from utils.stats import smd as _smd, cuped_adjust as _cuped_adjust
 
 
 # ============================================================
@@ -43,24 +44,6 @@ def _plot_bar(series, title, ax, ylabel=None):
     ax.set_xlabel("Group")
     if ylabel:
         ax.set_ylabel(ylabel)
-
-
-def _smd(x1, x2):
-    if len(x1) < 2 or len(x2) < 2:
-        return np.nan
-    pooled = np.sqrt((x1.var(ddof=1) + x2.var(ddof=1)) / 2)
-    return abs(x1.mean() - x2.mean()) / pooled if pooled else np.nan
-
-
-def _cuped_adjust(pre, post):
-    X = pre.values
-    Y = post.values
-    var_x = np.var(X, ddof=1)
-    if var_x == 0:
-        return None
-    theta = np.cov(Y, X, ddof=1)[0, 1] / var_x
-    return post - theta * (pre - X.mean())
-
 
 # ============================================================
 # -------- Multigroup balance (numeric + categorical) --------
