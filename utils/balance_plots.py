@@ -6,10 +6,17 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from typing import List, Optional
+from typing import List, Optional, Dict
 from scipy.stats import ttest_ind
 from utils.data_filtering import is_id_column
 from utils.stats import smd as _smd
+
+# Try to import streamlit for caching, but don't fail if not available
+try:
+    import streamlit as st
+    STREAMLIT_AVAILABLE = True
+except ImportError:
+    STREAMLIT_AVAILABLE = False
 
 
 def _pairwise_matrix(groups, fn):
@@ -22,7 +29,40 @@ def _pairwise_matrix(groups, fn):
     return mat
 
 
-def create_balance_report_plotly(
+def _precompute_group_data(df: pd.DataFrame, group_column: str, columns: List[str]) -> Dict[str, Dict[str, np.ndarray]]:
+    """
+    Pre-compute group data arrays for efficient access.
+    This avoids repeated DataFrame filtering operations.
+    
+    Args:
+        df: DataFrame with group assignments
+        group_column: Name of the column containing group assignments
+        columns: List of column names to pre-compute
+        
+    Returns:
+        dict: {group_name: {column_name: numpy_array}}
+    """
+    groups = sorted(df[group_column].unique())
+    group_data = {}
+    
+    # Pre-compute group indices once
+    group_indices = {}
+    for g in groups:
+        mask = df[group_column] == g
+        group_indices[g] = df.index[mask]
+    
+    # Pre-extract data for each group and column
+    for g in groups:
+        group_data[g] = {}
+        for col in columns:
+            if col in df.columns:
+                # Use pre-computed indices for fast access
+                group_data[g][col] = df.loc[group_indices[g], col].dropna().values
+    
+    return group_data
+
+
+def _create_balance_report_plotly_impl(
     df: pd.DataFrame,
     value_columns: List[str],
     strat_columns: List[str],
@@ -125,6 +165,11 @@ def create_balance_report_plotly(
     row_idx = 1
     
     # =========================
+    # Pre-compute group data for all numeric columns (Issue #1 fix)
+    # =========================
+    group_data_cache = _precompute_group_data(df, group_column, value_columns)
+    
+    # =========================
     # Numeric columns
     # =========================
     for col in value_columns:
@@ -135,14 +180,15 @@ def create_balance_report_plotly(
         if is_id_column(df, col):
             continue
         
-        # Filter valid groups (with sufficient data)
+        # Filter valid groups (with sufficient data) using cached data
         valid_groups = []
         group_means = {}
         for g in groups:
-            group_data = df[df[group_column] == g][col].dropna()
-            if len(group_data) >= 2:
-                valid_groups.append(g)
-                group_means[g] = group_data.mean()
+            if g in group_data_cache and col in group_data_cache[g]:
+                data_array = group_data_cache[g][col]
+                if len(data_array) >= 2:
+                    valid_groups.append(g)
+                    group_means[g] = np.mean(data_array)
         
         if len(valid_groups) < 2:
             row_idx += 1
@@ -184,10 +230,10 @@ def create_balance_report_plotly(
             row=row_idx, col=2
         )
         
-        # Plot 3: Heatmap - SMD
+        # Plot 3: Heatmap - SMD (using cached data)
         def smd_func(g1, g2):
-            x1 = df[df[group_column] == g1][col].dropna()
-            x2 = df[df[group_column] == g2][col].dropna()
+            x1 = group_data_cache[g1][col]
+            x2 = group_data_cache[g2][col]
             return _smd(x1, x2)
         
         smd_mat = _pairwise_matrix(valid_groups, smd_func)
@@ -207,10 +253,10 @@ def create_balance_report_plotly(
             row=row_idx, col=3
         )
         
-        # Plot 4: Heatmap - p-values
+        # Plot 4: Heatmap - p-values (using cached data)
         def pval(g1, g2):
-            x1 = df[df[group_column] == g1][col].dropna()
-            x2 = df[df[group_column] == g2][col].dropna()
+            x1 = group_data_cache[g1][col]
+            x2 = group_data_cache[g2][col]
             if len(x1) < 2 or len(x2) < 2:
                 return np.nan
             try:
@@ -353,12 +399,13 @@ def create_balance_report_plotly(
         if col not in df.columns:
             continue
         
-        # Check if we have valid groups for this column
+        # Check if we have valid groups for this column (using cached data)
         valid_groups = []
         for g in groups:
-            group_data = df[df[group_column] == g][col].dropna()
-            if len(group_data) >= 2:
-                valid_groups.append(g)
+            if g in group_data_cache and col in group_data_cache[g]:
+                data_array = group_data_cache[g][col]
+                if len(data_array) >= 2:
+                    valid_groups.append(g)
         
         if len(valid_groups) < 2:
             continue
@@ -393,3 +440,54 @@ def create_balance_report_plotly(
         current_row += 1
     
     return fig
+
+
+# Cached version for Streamlit (Issue #4 fix)
+if STREAMLIT_AVAILABLE:
+    @st.cache_data(show_spinner=False)
+    def _create_balance_report_plotly_cached(
+        df: pd.DataFrame,
+        value_cols: tuple,
+        strat_cols: tuple,
+        group_col: str,
+        plot_title: str
+    ) -> go.Figure:
+        """Cached version that Streamlit can use."""
+        return _create_balance_report_plotly_impl(df, list(value_cols), list(strat_cols), group_col, plot_title)
+
+
+def create_balance_report_plotly(
+    df: pd.DataFrame,
+    value_columns: List[str],
+    strat_columns: List[str],
+    group_column: str,
+    title: str = "Balance Report",
+    _use_cache: bool = True
+) -> go.Figure:
+    """
+    Create a comprehensive interactive Plotly balance report.
+    This is a wrapper that calls the implementation function with optional caching.
+    
+    Args:
+        df: DataFrame with group assignments
+        value_columns: List of numeric columns to analyze
+        strat_columns: List of categorical columns to analyze
+        group_column: Name of the column containing group assignments
+        title: Overall title for the report
+        _use_cache: Whether to use Streamlit caching (default: True)
+        
+    Returns:
+        Plotly Figure object
+    """
+    # Use caching if Streamlit is available and caching is enabled
+    if STREAMLIT_AVAILABLE and _use_cache:
+        return _create_balance_report_plotly_cached(
+            df,
+            tuple(value_columns),
+            tuple(strat_columns),
+            group_column,
+            title
+        )
+    else:
+        # No caching, call directly
+        return _create_balance_report_plotly_impl(df, value_columns, strat_columns, group_column, title)

@@ -8,6 +8,7 @@ from rebalancer.ui_components import (
     render_configuration,
     render_rebalancing
 )
+from rebalancer.guide import render_guide
 from utils.streamlit_artifacts import render_download_artifact_button as _render_download_artifact_button
 
 
@@ -27,10 +28,11 @@ def show_rebalancer_page():
     st.markdown("Upload data with existing groups and rebalance by trimming rows")
     
     # Create tabs
-    tab_upload, tab_config, tab_rebalancing = st.tabs([
+    tab_upload, tab_config, tab_rebalancing, tab_instructions = st.tabs([
         "📤 Data Upload",
         "⚙️ Configuration",
-        "⚖️ Rebalancing"
+        "⚖️ Rebalancing",
+        "📚 How-To Guide"
     ])
     
     with tab_upload:
@@ -41,3 +43,6 @@ def show_rebalancer_page():
     
     with tab_rebalancing:
         render_rebalancing()
+    
+    with tab_instructions:
+        render_guide()

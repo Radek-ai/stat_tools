@@ -5,9 +5,16 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from typing import List, Optional
+from typing import List, Optional, Dict
 from scipy.stats import ttest_ind
 from utils.stats import smd as _smd, cuped_adjust as _cuped_adjust
+
+# Try to import streamlit for caching, but don't fail if not available
+try:
+    import streamlit as st
+    STREAMLIT_AVAILABLE = True
+except ImportError:
+    STREAMLIT_AVAILABLE = False
 
 
 def _pairwise_matrix(groups, fn):
@@ -20,7 +27,40 @@ def _pairwise_matrix(groups, fn):
     return mat
 
 
-def create_basic_analysis_plotly(
+def _precompute_group_data(df: pd.DataFrame, group_column: str, columns: List[str]) -> Dict[str, Dict[str, np.ndarray]]:
+    """
+    Pre-compute group data arrays for efficient access.
+    This avoids repeated DataFrame filtering operations.
+    
+    Args:
+        df: DataFrame with group assignments
+        group_column: Name of the column containing group assignments
+        columns: List of column names to pre-compute
+        
+    Returns:
+        dict: {group_name: {column_name: numpy_array}}
+    """
+    groups = sorted(df[group_column].unique())
+    group_data = {}
+    
+    # Pre-compute group indices once
+    group_indices = {}
+    for g in groups:
+        mask = df[group_column] == g
+        group_indices[g] = df.index[mask]
+    
+    # Pre-extract data for each group and column
+    for g in groups:
+        group_data[g] = {}
+        for col in columns:
+            if col in df.columns:
+                # Use pre-computed indices for fast access
+                group_data[g][col] = df.loc[group_indices[g], col].dropna().values
+    
+    return group_data
+
+
+def _create_basic_analysis_plotly_impl(
     df: pd.DataFrame,
     value_columns: List[str],
     group_column: str,
@@ -70,16 +110,20 @@ def create_basic_analysis_plotly(
     
     row_idx = 1
     
+    # Pre-compute group data for all columns (Issue #1 fix)
+    group_data_cache = _precompute_group_data(df, group_column, valid_columns)
+    
     for col in valid_columns:
-        # Calculate statistics for all groups
+        # Calculate statistics for all groups using cached data
         group_means = {}
         group_data = {}
         
         for g in groups:
-            data = df[df[group_column] == g][col].dropna()
-            if len(data) >= 2:
-                group_means[g] = data.mean()
-                group_data[g] = data
+            if g in group_data_cache and col in group_data_cache[g]:
+                data_array = group_data_cache[g][col]
+                if len(data_array) >= 2:
+                    group_means[g] = np.mean(data_array)
+                    group_data[g] = data_array
         
         if len(group_means) < 2:
             row_idx += 1
@@ -202,7 +246,54 @@ def create_basic_analysis_plotly(
     return fig
 
 
-def create_cuped_analysis_plotly(
+# Cached version for Streamlit (Issue #4 fix)
+if STREAMLIT_AVAILABLE:
+    @st.cache_data(show_spinner=False)
+    def _create_basic_analysis_plotly_cached(
+        df: pd.DataFrame,
+        value_cols: tuple,
+        group_col: str,
+        plot_title: str
+    ) -> go.Figure:
+        """Cached version that Streamlit can use."""
+        return _create_basic_analysis_plotly_impl(df, list(value_cols), group_col, plot_title)
+
+
+def create_basic_analysis_plotly(
+    df: pd.DataFrame,
+    value_columns: List[str],
+    group_column: str,
+    title: str = "Treatment Effect Analysis",
+    _use_cache: bool = True
+) -> go.Figure:
+    """
+    Create Plotly visualization for basic treatment effect analysis.
+    Shows means, uplifts, SMD, and p-values for each metric.
+    
+    Args:
+        df: DataFrame with group assignments and metrics
+        value_columns: List of numeric columns to analyze
+        group_column: Name of the column containing group assignments
+        title: Overall title for the plot
+        _use_cache: Whether to use Streamlit caching (default: True)
+        
+    Returns:
+        Plotly Figure object
+    """
+    # Use caching if Streamlit is available and caching is enabled
+    if STREAMLIT_AVAILABLE and _use_cache:
+        return _create_basic_analysis_plotly_cached(
+            df,
+            tuple(value_columns),
+            group_column,
+            title
+        )
+    else:
+        # No caching, call directly
+        return _create_basic_analysis_plotly_impl(df, value_columns, group_column, title)
+
+
+def _create_cuped_analysis_plotly_impl(
     df: pd.DataFrame,
     base_metrics: List[str],
     group_column: str,
@@ -272,11 +363,18 @@ def create_cuped_analysis_plotly(
         cuped_means = {}
         cuped_data = {}
         
+        # Pre-compute group indices for CUPED data
+        group_indices = {}
         for g in groups:
-            data = adj[df[group_column] == g].dropna()
-            if len(data) >= 2:
-                cuped_means[g] = data.mean()
-                cuped_data[g] = data
+            mask = df[group_column] == g
+            group_indices[g] = df.index[mask]
+        
+        for g in groups:
+            # Use pre-computed indices for fast access
+            data_array = adj.loc[group_indices[g]].dropna().values
+            if len(data_array) >= 2:
+                cuped_means[g] = np.mean(data_array)
+                cuped_data[g] = data_array
         
         if len(cuped_means) < 2:
             row_idx += 1
@@ -376,7 +474,61 @@ def create_cuped_analysis_plotly(
     return fig
 
 
-def create_did_analysis_plotly(
+# Cached version for Streamlit (Issue #4 fix)
+if STREAMLIT_AVAILABLE:
+    @st.cache_data(show_spinner=False)
+    def _create_cuped_analysis_plotly_cached(
+        df: pd.DataFrame,
+        base_metrics: tuple,
+        group_col: str,
+        suffix_pre: str,
+        suffix_post: str,
+        plot_title: str
+    ) -> go.Figure:
+        """Cached version that Streamlit can use."""
+        return _create_cuped_analysis_plotly_impl(df, list(base_metrics), group_col, suffix_pre, suffix_post, plot_title)
+
+
+def create_cuped_analysis_plotly(
+    df: pd.DataFrame,
+    base_metrics: List[str],
+    group_column: str,
+    suffix_pre: str = "_pre",
+    suffix_post: str = "_post",
+    title: str = "CUPED-Adjusted Treatment Effect Analysis",
+    _use_cache: bool = True
+) -> go.Figure:
+    """
+    Create Plotly visualization for CUPED-adjusted analysis.
+    
+    Args:
+        df: DataFrame with group assignments and pre/post metrics
+        base_metrics: List of base metric names (without suffixes)
+        group_column: Name of the column containing group assignments
+        suffix_pre: Suffix for pre-experiment columns
+        suffix_post: Suffix for post-experiment columns
+        title: Overall title for the plot
+        _use_cache: Whether to use Streamlit caching (default: True)
+        
+    Returns:
+        Plotly Figure object
+    """
+    # Use caching if Streamlit is available and caching is enabled
+    if STREAMLIT_AVAILABLE and _use_cache:
+        return _create_cuped_analysis_plotly_cached(
+            df,
+            tuple(base_metrics),
+            group_column,
+            suffix_pre,
+            suffix_post,
+            title
+        )
+    else:
+        # No caching, call directly
+        return _create_cuped_analysis_plotly_impl(df, base_metrics, group_column, suffix_pre, suffix_post, title)
+
+
+def _create_did_analysis_plotly_impl(
     df: pd.DataFrame,
     base_metrics: List[str],
     group_column: str,
@@ -445,10 +597,17 @@ def create_did_analysis_plotly(
         post_means = {}
         pct_changes = {}
         
+        # Pre-compute group indices once
+        group_indices = {}
         for g in groups:
-            gdf = df[df[group_column] == g]
-            pre_means[g] = gdf[pre_col].mean()
-            post_means[g] = gdf[post_col].mean()
+            mask = df[group_column] == g
+            group_indices[g] = df.index[mask]
+        
+        for g in groups:
+            # Use pre-computed indices for fast access
+            g_indices = group_indices[g]
+            pre_means[g] = df.loc[g_indices, pre_col].mean()
+            post_means[g] = df.loc[g_indices, post_col].mean()
             # Calculate % change
             if pre_means[g] != 0:
                 pct_changes[g] = ((post_means[g] - pre_means[g]) / pre_means[g]) * 100
@@ -491,13 +650,13 @@ def create_did_analysis_plotly(
             row=row_idx, col=3
         )
         
-        # Column 4: DiD gap heatmap
+        # Column 4: DiD gap heatmap (using pre-computed indices)
         def did_gap(g1, g2):
-            g1df = df[df[group_column] == g1]
-            g2df = df[df[group_column] == g2]
+            g1_indices = group_indices[g1]
+            g2_indices = group_indices[g2]
             
-            d_pre = g2df[pre_col].mean() - g1df[pre_col].mean()
-            d_post = g2df[post_col].mean() - g1df[post_col].mean()
+            d_pre = df.loc[g2_indices, pre_col].mean() - df.loc[g1_indices, pre_col].mean()
+            d_post = df.loc[g2_indices, post_col].mean() - df.loc[g1_indices, post_col].mean()
             return d_post - d_pre
         
         did_mat = _pairwise_matrix(groups, did_gap)
@@ -551,3 +710,57 @@ def create_did_analysis_plotly(
         fig.update_yaxes(title_text="Group", row=i, col=4)
     
     return fig
+
+
+# Cached version for Streamlit (Issue #4 fix)
+if STREAMLIT_AVAILABLE:
+    @st.cache_data(show_spinner=False)
+    def _create_did_analysis_plotly_cached(
+        df: pd.DataFrame,
+        base_metrics: tuple,
+        group_col: str,
+        suffix_pre: str,
+        suffix_post: str,
+        plot_title: str
+    ) -> go.Figure:
+        """Cached version that Streamlit can use."""
+        return _create_did_analysis_plotly_impl(df, list(base_metrics), group_col, suffix_pre, suffix_post, plot_title)
+
+
+def create_did_analysis_plotly(
+    df: pd.DataFrame,
+    base_metrics: List[str],
+    group_column: str,
+    suffix_pre: str = "_aa",
+    suffix_post: str = "_ab",
+    title: str = "Difference-in-Differences Analysis",
+    _use_cache: bool = True
+) -> go.Figure:
+    """
+    Create Plotly visualization for DiD analysis.
+    
+    Args:
+        df: DataFrame with group assignments and pre/post metrics
+        base_metrics: List of base metric names (without suffixes)
+        group_column: Name of the column containing group assignments
+        suffix_pre: Suffix for pre-experiment columns
+        suffix_post: Suffix for post-experiment columns
+        title: Overall title for the plot
+        _use_cache: Whether to use Streamlit caching (default: True)
+        
+    Returns:
+        Plotly Figure object
+    """
+    # Use caching if Streamlit is available and caching is enabled
+    if STREAMLIT_AVAILABLE and _use_cache:
+        return _create_did_analysis_plotly_cached(
+            df,
+            tuple(base_metrics),
+            group_column,
+            suffix_pre,
+            suffix_post,
+            title
+        )
+    else:
+        # No caching, call directly
+        return _create_did_analysis_plotly_impl(df, base_metrics, group_column, suffix_pre, suffix_post, title)

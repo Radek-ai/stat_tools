@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from others.multi_rebalancer import MultiGroupRebalancer
+from rebalancer.tooltips import PARAMETER_TOOLTIPS
 from utils.artifact_builder import ArtifactBuilder
 from utils.data_filtering import is_id_column
 from utils.streamlit_errors import handle_error
@@ -80,7 +81,7 @@ def render_rebalancing():
         index=1,
         horizontal=True,
         key="rebalancing_mode",
-        help="Basic: Even-size seed search. Advanced: Iterative rebalancing with middle/odd group strategy"
+        help=PARAMETER_TOOLTIPS.get("rebalancing_mode", "")
     )
     
     # Get columns for balancing (exclude ID columns)
@@ -104,7 +105,7 @@ def render_rebalancing():
         options=numeric_cols,
         default=numeric_cols[:min(5, len(numeric_cols))] if numeric_cols else [],
         key="rebalancer_value_columns",
-        help="Select numeric columns to use for balance calculation"
+        help=PARAMETER_TOOLTIPS.get("numeric_columns", "")
     )
     
     # Stratification columns selection
@@ -113,7 +114,7 @@ def render_rebalancing():
         options=categorical_cols,
         default=categorical_cols[:min(3, len(categorical_cols))] if categorical_cols else [],
         key="rebalancer_strat_columns",
-        help="Select categorical columns to use for balance calculation"
+        help=PARAMETER_TOOLTIPS.get("categorical_columns", "")
     )
     
     if not value_columns and not strat_columns:
@@ -140,7 +141,7 @@ def render_rebalancing():
                     value=0.95,
                     step=0.01,
                     key=f"rebalancer_p_value_{col}",
-                    help="Target p-value for t-test between groups. Use negative value to maximize p-value."
+                    help=PARAMETER_TOOLTIPS.get("target_p_value", "")
                 )
                 numeric_p_values[col] = p_val
         else:
@@ -158,7 +159,7 @@ def render_rebalancing():
                     value=5.0,
                     step=0.1,
                     key=f"rebalancer_imbalance_{col}",
-                    help="Maximum allowed total imbalance percentage for this categorical column"
+                    help=PARAMETER_TOOLTIPS.get("max_imbalance_percent", "")
                 )
                 categorical_imbalance[col] = imbalance
         else:
@@ -178,7 +179,7 @@ def render_rebalancing():
                 "Enable Even Size Seed Search",
                 value=False,
                 key="rebalancer_enable_seed_search",
-                help="Subsample all groups to smallest size, minimizing total loss"
+                help=PARAMETER_TOOLTIPS.get("enable_seed_search", "")
             )
         
         with col_param2:
@@ -190,7 +191,7 @@ def render_rebalancing():
                     value=1000,
                     step=100,
                     key="rebalancer_even_size_trials",
-                    help="Number of random seeds to try for even-size subsampling"
+                    help=PARAMETER_TOOLTIPS.get("even_size_trials", "")
                 )
             else:
                 even_size_trials = 0
@@ -206,7 +207,7 @@ def render_rebalancing():
                 value=100,
                 step=10,
                 key="rebalancer_max_removals",
-                help="Maximum number of rows to remove per group"
+                help=PARAMETER_TOOLTIPS.get("max_removals", "")
             )
         
         with col_param2:
@@ -217,7 +218,7 @@ def render_rebalancing():
                 value=10,
                 step=10,
                 key="rebalancer_top_k",
-                help="Number of top candidates to consider for trimming"
+                help=PARAMETER_TOOLTIPS.get("top_k_candidates", "")
             )
         
         with col_param3:
@@ -228,7 +229,7 @@ def render_rebalancing():
                 value=200,
                 step=10,
                 key="rebalancer_random_candidates",
-                help="Number of random candidates to consider"
+                help=PARAMETER_TOOLTIPS.get("k_random_candidates", "")
             )
         
         col_param4, col_param5 = st.columns(2)
@@ -242,7 +243,7 @@ def render_rebalancing():
                 step=0.0001,
                 format="%.4f",
                 key="rebalancer_gain_threshold",
-                help="Minimum gain required to make a move"
+                help=PARAMETER_TOOLTIPS.get("gain_threshold", "")
             )
         
         with col_param5:
@@ -250,14 +251,14 @@ def render_rebalancing():
                 "Early Break",
                 value=False,
                 key="rebalancer_early_break",
-                help="Stop searching candidates once a good move is found"
+                help=PARAMETER_TOOLTIPS.get("early_break", "")
             )
             
             enable_seed_search = st.checkbox(
                 "Enable Even Size Seed Search",
                 value=False,
                 key="rebalancer_enable_seed_search_advanced",
-                help="First subsample all groups to smallest size"
+                help=PARAMETER_TOOLTIPS.get("enable_seed_search_advanced", "")
             )
             
             if enable_seed_search:
@@ -268,7 +269,7 @@ def render_rebalancing():
                     value=1000,
                     step=100,
                     key="rebalancer_even_size_trials_advanced",
-                    help="Number of random seeds to try"
+                    help=PARAMETER_TOOLTIPS.get("even_size_trials_advanced", "")
                 )
             else:
                 even_size_trials = 0
@@ -285,7 +286,7 @@ def render_rebalancing():
             "🔄 Continue Rebalancing from Current State",
             value=False,
             key="rebalancer_continue",
-            help="Continue rebalancing from the previously rebalanced groups. This will use the current rebalanced state as the starting point."
+            help=PARAMETER_TOOLTIPS.get("continue_rebalancing", "")
         )
     
     st.divider()
@@ -372,13 +373,21 @@ def render_rebalancing():
             artifact = st.session_state.get('rebalancer_artifact')
             if artifact:
                 artifact.add_df('rebalanced_data', rebalanced_df, 'Final rebalanced groups')
+                
+                # Determine run number for log message
+                existing_runs = artifact.config.get('rebalancing_runs', 0)
+                run_number = existing_runs + 1 if continue_rebalancing else 1
+                run_label = f" (Run {run_number})" if continue_rebalancing else ""
+                
                 artifact.add_log(
                     category='rebalancing',
-                    message=f'Rebalancing complete: {len(rebalanced_df)} rows in {len(rebalanced_df[group_column].unique())} groups',
+                    message=f'Rebalancing complete{run_label}: {len(rebalanced_df)} rows in {len(rebalanced_df[group_column].unique())} groups',
                     details={
                         'mode': rebalancing_mode,
                         'n_groups': len(rebalanced_df[group_column].unique()),
-                        'group_names': sorted(rebalanced_df[group_column].unique().tolist())
+                        'group_names': sorted(rebalanced_df[group_column].unique().tolist()),
+                        'is_continuation': continue_rebalancing,
+                        'run_number': run_number
                     }
                 )
             
@@ -425,6 +434,25 @@ def render_rebalancing():
             # Add rebalancing config to artifact
             artifact = st.session_state.get('rebalancer_artifact')
             if artifact:
+                # Track continuation runs
+                existing_runs = artifact.config.get('rebalancing_runs', 0)
+                if continue_rebalancing:
+                    rebalancing_runs = existing_runs + 1
+                else:
+                    rebalancing_runs = 1
+                
+                # Prepare loss history summary
+                loss_summary = None
+                if loss_history:
+                    loss_summary = {
+                        'total_iterations': len(loss_history),
+                        'initial_loss': loss_history[0] if loss_history else None,
+                        'final_loss': loss_history[-1] if loss_history else None,
+                        'all_values': loss_history,  # Store complete loss history
+                        'n_runs': len(loss_history_runs) if loss_history_runs else 1,
+                        'loss_history_runs': loss_history_runs if loss_history_runs else None  # Store separate runs if available
+                    }
+                
                 artifact.set_config({
                     'rebalancing_mode': rebalancing_mode,
                     'group_column': group_column,
@@ -436,7 +464,8 @@ def render_rebalancing():
                     },
                     'middle_group': rebalancer.middle_group if hasattr(rebalancer, 'middle_group') else None,
                     'odd_group': rebalancer.odd_group if hasattr(rebalancer, 'odd_group') else None,
-                    'loss_history': loss_history[-10:] if loss_history else []  # Last 10 for summary
+                    'rebalancing_runs': rebalancing_runs,
+                    'loss_history_summary': loss_summary
                 })
             
             if continue_rebalancing:

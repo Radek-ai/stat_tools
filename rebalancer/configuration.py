@@ -8,6 +8,7 @@ import streamlit as st
 
 from scipy.stats import ttest_ind
 
+from rebalancer.tooltips import PARAMETER_TOOLTIPS
 from utils.balance_plots import create_balance_report_plotly
 from utils.data_filtering import is_id_column
 from utils.stats import smd as _smd
@@ -35,7 +36,7 @@ def render_configuration():
         options=[""] + df.columns.tolist(),
         index=0,  # Default to empty
         key="rebalancer_upload_group_column",
-        help="Select the column containing group assignments"
+        help=PARAMETER_TOOLTIPS.get("group_column", "")
     )
     
     if not group_column or group_column == "":

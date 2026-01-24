@@ -6,14 +6,13 @@ from power_analysis.streamlit_page import show_power_analysis_page
 from group_selection.streamlit_page import show_group_selection_page
 from rebalancer.streamlit_page import show_rebalancer_page
 from results_analysis.streamlit_page import show_results_analysis_page
+from howto.streamlit_page import show_howto_page
 # Page configuration
 st.set_page_config(
     page_title="Statistical Analysis Tool",
     layout="wide",
     initial_sidebar_state="collapsed"
-)
-print("Starting the app")
-# Initialize session state for navigation
+)# Initialize session state for navigation
 if 'current_page' not in st.session_state:
     st.session_state.current_page = 'main'
 
@@ -25,16 +24,22 @@ def navigate_to(page_name):
 
 # Main page content
 if st.session_state.current_page == 'main':
-    # Header section with better styling
-    st.markdown("""
-    <div style='text-align: center; padding: 20px 0 30px 0;'>
-        <h1 style='color: #1f77b4; margin-bottom: 10px; font-size: 2.5em;'>📊 A/B Testing Experimentation Suite</h1>
-        <p style='color: #666; font-size: 1.1em; margin-top: 0;'>Complete workflow from experiment design through group selection to treatment effect analysis rebalancing</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Header section with better styling and How-To button
+    empty_col, col_title, col_howto = st.columns([1, 4, 1])
+    with col_title:
+        st.markdown("""
+        <div style='text-align: center; padding: 20px 0 30px 0;'>
+            <h1 style='color: #1f77b4; margin-bottom: 10px; font-size: 2.5em;'>📊 A/B Testing Experimentation Suite</h1>
+            <p style='color: #666; font-size: 1.1em; margin-top: 0;'>Complete workflow from experiment design through group selection to treatment effect analysis rebalancing</p>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_howto:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("📚 How-To Guide", key="view_howto_top", use_container_width=True, type="secondary"):
+            navigate_to('howto')
     
     # Add some spacing
-    st.markdown("<br>", unsafe_allow_html=True)
+    # st.markdown("<br>", unsafe_allow_html=True)
     
     # Create 4 columns for the main tools
     col1, col2, col3, col4 = st.columns(4)
@@ -214,7 +219,7 @@ if st.session_state.current_page == 'main':
             navigate_to('results_analysis')
     
     # Add footer/info section
-    st.markdown("<br><br>", unsafe_allow_html=True)
+    # st.markdown("<br><br>", unsafe_allow_html=True)
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; padding: 20px; color: #888;'>
@@ -274,3 +279,10 @@ elif st.session_state.current_page == 'results_analysis':
         from results_analysis.streamlit_page import render_download_artifact_button
         render_download_artifact_button()
     show_results_analysis_page()
+
+# How-To Guide Page
+elif st.session_state.current_page == 'howto':
+    # Add back button
+    if st.button("← Back to Main", key="back_to_main_howto"):
+        navigate_to('main')
+    show_howto_page()

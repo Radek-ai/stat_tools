@@ -8,6 +8,7 @@ from group_selection.ui_components import (
     render_configuration,
     render_group_balancing
 )
+from group_selection.guide import render_guide
 from utils.streamlit_artifacts import render_download_artifact_button as _render_download_artifact_button
 
 
@@ -27,10 +28,11 @@ def show_group_selection_page():
     st.markdown("Upload data, apply filters, and balance groups for A/B testing experiments")
     
     # Create tabs
-    tab_upload, tab_config, tab_balancing = st.tabs([
+    tab_upload, tab_config, tab_balancing, tab_instructions = st.tabs([
         "📤 Data Upload",
         "⚙️ Configuration",
-        "⚖️ Group Balancing"
+        "⚖️ Group Balancing",
+        "📚 How-To Guide"
     ])
     
     with tab_upload:
@@ -41,3 +43,6 @@ def show_group_selection_page():
     
     with tab_balancing:
         render_group_balancing()
+    
+    with tab_instructions:
+        render_guide()

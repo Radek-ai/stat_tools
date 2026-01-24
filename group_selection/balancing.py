@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from others.balancer import MultiGroupBalancer
+from group_selection.tooltips import PARAMETER_TOOLTIPS
 from utils.artifact_builder import ArtifactBuilder
 from utils.data_filtering import is_id_column
 from utils.streamlit_errors import handle_error
@@ -57,7 +58,7 @@ def render_group_balancing():
             max_value=10,
             value=2,
             key="balancing_n_groups",
-            help="Number of groups to create (e.g., 2 for control/treatment)"
+            help=PARAMETER_TOOLTIPS.get("n_groups", "")
         )
         
         # Group column name
@@ -65,7 +66,7 @@ def render_group_balancing():
             "Group Column Name",
             value="group",
             key="balancing_group_column",
-            help="Name of the column that will store group assignments"
+            help=PARAMETER_TOOLTIPS.get("group_column_name", "")
         )
         
         # Group names and proportions
@@ -87,13 +88,25 @@ def render_group_balancing():
                     default_name = f"group_{i+1}"
                 
                 # Use key that includes n_groups so widgets reset when n_groups changes
-                name = st.text_input(f"Group {i+1} Name", value=default_name, key=f"balancing_group_name_{n_groups}_{i}")
+                name = st.text_input(
+                    f"Group {i+1} Name", 
+                    value=default_name, 
+                    key=f"balancing_group_name_{n_groups}_{i}",
+                    help=PARAMETER_TOOLTIPS.get("group_name", "")
+                )
                 group_names.append(name)
             with col_prop:
                 # Default proportion (equal split)
                 # Use key that includes n_groups so it resets when n_groups changes
                 default_prop = 1.0 / n_groups
-                prop = st.number_input(f"Prop {i+1}", value=default_prop, min_value=0.0, max_value=1.0, key=f"balancing_group_prop_{n_groups}_{i}")
+                prop = st.number_input(
+                    f"Prop {i+1}", 
+                    value=default_prop, 
+                    min_value=0.0, 
+                    max_value=1.0, 
+                    key=f"balancing_group_prop_{n_groups}_{i}",
+                    help=PARAMETER_TOOLTIPS.get("group_proportion", "")
+                )
                 group_proportions.append(prop)
         
         # Normalize proportions
@@ -115,7 +128,7 @@ def render_group_balancing():
                 options=numeric_cols,
                 default=numeric_cols[:min(3, len(numeric_cols))] if numeric_cols else [],
                 key="balancing_value_columns",
-                help="Select numeric columns to balance between groups"
+                help=PARAMETER_TOOLTIPS.get("numeric_columns", "")
             )
         else:
             st.warning("⚠️ No numeric columns found in data")
@@ -130,7 +143,7 @@ def render_group_balancing():
                 options=categorical_cols,
                 default=categorical_cols[:min(2, len(categorical_cols))] if categorical_cols else [],
                 key="balancing_strat_columns",
-                help="Select categorical columns for stratified balancing"
+                help=PARAMETER_TOOLTIPS.get("categorical_columns", "")
             )
         else:
             st.info("ℹ️ No categorical columns found")
@@ -171,7 +184,7 @@ def render_group_balancing():
             options=["Basic", "Advanced"],
             index=1,
             key="selection_mode",
-            help="Basic: Stratified initial group assignment only. Advanced: Initial assignment + iterative balancing."
+            help=PARAMETER_TOOLTIPS.get("selection_mode", "")
         )
     
     if selection_mode == "Basic":
@@ -186,9 +199,9 @@ def render_group_balancing():
                 min_value=2,
                 max_value=10,
                 key="basic_n_bins",
-                help="Number of bins to create for numeric column stratification"
+                help=PARAMETER_TOOLTIPS.get("n_bins", "")
             )
-        
+            
         with col_basic2:
             random_seed = st.number_input(
                 "Random Seed",
@@ -196,7 +209,7 @@ def render_group_balancing():
                 min_value=None,
                 max_value=None,
                 key="basic_random_seed",
-                help="Random seed for reproducible results (None for random)"
+                help=PARAMETER_TOOLTIPS.get("random_seed", "")
             )
         
         # Initialize empty objectives for basic mode (not used)
@@ -222,7 +235,7 @@ def render_group_balancing():
                         max_value=1.0,
                         step=0.01,
                         key=f"balancing_p_value_{col}",
-                        help="Target p-value for t-test between groups. Use negative value to maximize p-value."
+                        help=PARAMETER_TOOLTIPS.get("target_p_value", "")
                     )
                     numeric_p_values[col] = p_val
             else:
@@ -240,7 +253,7 @@ def render_group_balancing():
                         max_value=100.0,
                         step=0.5,
                         key=f"balancing_imbalance_{col}",
-                        help="Maximum acceptable total imbalance percentage"
+                        help=PARAMETER_TOOLTIPS.get("max_imbalance_percent", "")
                     )
                     categorical_imbalance[col] = imbalance
             else:
@@ -256,7 +269,7 @@ def render_group_balancing():
             options=["Sequential Moves", "Swaps"],
             index=0,
             key="balancing_algorithm",
-            help="Sequential: Move rows between groups. Swaps: Swap rows between groups."
+            help=PARAMETER_TOOLTIPS.get("algorithm", "")
         )
         
         # Batch mode toggle
@@ -264,7 +277,7 @@ def render_group_balancing():
             "Use Batch Mode (Less Overfitting)",
             value=False,
             key="balancing_batch_mode",
-            help="Move/swap groups of rows at once instead of single rows. Reduces overfitting by making larger, more robust changes."
+            help=PARAMETER_TOOLTIPS.get("batch_mode", "")
         )
         
         if use_batch_mode:
@@ -280,7 +293,7 @@ def render_group_balancing():
                     min_value=1,
                     max_value=500,
                     key="balancing_max_iterations",
-                    help="Maximum number of iterations to run"
+                    help=PARAMETER_TOOLTIPS.get("max_iterations", "")
                 )
             
             with col_batch2:
@@ -290,7 +303,7 @@ def render_group_balancing():
                     min_value=1,
                     max_value=50,
                     key="balancing_subset_size",
-                    help="Number of rows to move/swap in each batch"
+                    help=PARAMETER_TOOLTIPS.get("batch_size", "")
                 )
             
             with col_batch3:
@@ -300,7 +313,7 @@ def render_group_balancing():
                     min_value=1,
                     max_value=100,
                     key="balancing_n_samples",
-                    help="Number of random batch samples to try"
+                    help=PARAMETER_TOOLTIPS.get("random_samples", "")
                 )
             
             col_batch4, col_batch5 = st.columns(2)
@@ -313,7 +326,7 @@ def render_group_balancing():
                     max_value=1.0,
                     format="%.4f",
                     key="balancing_gain_threshold",
-                    help="Minimum gain required to continue balancing"
+                    help=PARAMETER_TOOLTIPS.get("gain_threshold", "")
                 )
             
             with col_batch5:
@@ -321,7 +334,7 @@ def render_group_balancing():
                     "Early Break",
                     value=True,
                     key="balancing_early_break",
-                    help="Stop searching candidates once a good move is found"
+                    help=PARAMETER_TOOLTIPS.get("early_break", "")
                 )
             
             # Set defaults for single-row mode (not used but needed for consistency)
@@ -342,7 +355,7 @@ def render_group_balancing():
                     min_value=1,
                     max_value=500,
                     key="balancing_max_iterations",
-                    help="Maximum number of iterations to run"
+                    help=PARAMETER_TOOLTIPS.get("max_iterations", "")
                 )
                 
                 top_k_candidates = st.number_input(
@@ -351,7 +364,7 @@ def render_group_balancing():
                     min_value=1,
                     max_value=100,
                     key="balancing_top_k",
-                    help="Number of outlier candidates to preselect based on z-scores"
+                    help=PARAMETER_TOOLTIPS.get("top_k_candidates", "")
                 )
             
             with col_alg2:
@@ -361,7 +374,7 @@ def render_group_balancing():
                     min_value=1,
                     max_value=100,
                     key="balancing_k_random",
-                    help="Number of random candidates to consider"
+                    help=PARAMETER_TOOLTIPS.get("k_random_candidates", "")
                 )
                 
                 gain_threshold = st.number_input(
@@ -371,7 +384,7 @@ def render_group_balancing():
                     max_value=1.0,
                     format="%.4f",
                     key="balancing_gain_threshold",
-                    help="Minimum gain required to continue balancing"
+                    help=PARAMETER_TOOLTIPS.get("gain_threshold", "")
                 )
             
             with col_alg3:
@@ -379,7 +392,7 @@ def render_group_balancing():
                     "Early Break",
                     value=True,
                     key="balancing_early_break",
-                    help="Stop searching candidates once a good move is found"
+                    help=PARAMETER_TOOLTIPS.get("early_break", "")
                 )
             
             # Set defaults for batch mode (not used but needed for consistency)
@@ -402,7 +415,7 @@ def render_group_balancing():
             "🔄 Continue Balancing from Current State",
             value=st.session_state.get("continue_balancing", False),
             key="continue_balancing",
-            help="Continue balancing from the previously balanced groups. This will use the current balanced state as the starting point."
+            help=PARAMETER_TOOLTIPS.get("continue_balancing", "")
         )
         # If checkbox is checked, force Advanced mode (will take effect on next rerun)
         if continue_balancing:
@@ -526,14 +539,22 @@ def render_group_balancing():
                 artifact = st.session_state.get('group_selection_artifact')
                 if artifact:
                     artifact.add_df('balanced_data', balanced_df, 'Final balanced groups')
+                    
+                    # Determine run number for log message
+                    existing_runs = artifact.config.get('balancing_runs', 0)
+                    run_number = existing_runs + 1 if continue_balancing else 1
+                    run_label = f" (Run {run_number})" if continue_balancing else ""
+                    
                     artifact.add_log(
                         category='balancing',
-                        message=f'Group balancing complete: {len(balanced_df)} rows assigned to {len(balanced_df[group_column].unique())} groups',
+                        message=f'Group balancing complete{run_label}: {len(balanced_df)} rows assigned to {len(balanced_df[group_column].unique())} groups',
                         details={
                             'mode': selection_mode,
                             'n_groups': len(balanced_df[group_column].unique()),
                             'group_names': sorted(balanced_df[group_column].unique().tolist()),
-                            'batch_mode': batch_mode_value
+                            'batch_mode': batch_mode_value,
+                            'is_continuation': continue_balancing,
+                            'run_number': run_number
                         }
                     )
                 
@@ -584,6 +605,25 @@ def render_group_balancing():
                 # Add balancing config to artifact
                 artifact = st.session_state.get('group_selection_artifact')
                 if artifact:
+                    # Track continuation runs
+                    existing_runs = artifact.config.get('balancing_runs', 0)
+                    if continue_balancing:
+                        balancing_runs = existing_runs + 1
+                    else:
+                        balancing_runs = 1
+                    
+                    # Prepare loss history summary
+                    loss_summary = None
+                    if loss_history:
+                        loss_summary = {
+                            'total_iterations': len(loss_history),
+                            'initial_loss': loss_history[0] if loss_history else None,
+                            'final_loss': loss_history[-1] if loss_history else None,
+                            'all_values': loss_history,  # Store complete loss history
+                            'n_runs': len(loss_history_runs) if loss_history_runs else 1,
+                            'loss_history_runs': loss_history_runs if loss_history_runs else None  # Store separate runs if available
+                        }
+                    
                     artifact.set_config({
                         'balancing_mode': selection_mode,
                         'group_column': group_column,
@@ -596,7 +636,8 @@ def render_group_balancing():
                             'numeric_p_values': numeric_p_values,
                             'categorical_imbalance': categorical_imbalance
                         } if selection_mode == "Advanced" else {},
-                        'loss_history': loss_history[-10:] if loss_history else []  # Last 10 for summary
+                        'balancing_runs': balancing_runs,
+                        'loss_history_summary': loss_summary
                     })
                 
                 if continue_balancing:

@@ -9,6 +9,7 @@ from utils.balance_plots import create_balance_report_plotly
 from utils.data_filtering import is_id_column
 from utils.stats import smd as _smd
 from utils.streamlit_errors import handle_error
+from utils.artifact_builder import ArtifactBuilder
 
 
 def render_rebalancing_results(original_df: pd.DataFrame, group_column: str, groups: list) -> None:
@@ -161,6 +162,11 @@ def render_rebalancing_results(original_df: pd.DataFrame, group_column: str, gro
                     height=400,
                     template='plotly_white'
                 )
+            
+            # Add loss plot to artifact
+            artifact = st.session_state.get('rebalancer_artifact')
+            if artifact:
+                artifact.add_plot('loss_history', fig, 'Rebalancing loss convergence over iterations')
             
             st.plotly_chart(fig, use_container_width=True)
             

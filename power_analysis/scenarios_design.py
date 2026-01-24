@@ -8,6 +8,7 @@ import json
 import os
 
 from power_analysis.data_processing import compute_all_scenarios
+from power_analysis.tooltips import PARAMETER_TOOLTIPS
 from utils.artifact_builder import ArtifactBuilder
 from utils.streamlit_upload import render_csv_upload_with_dummy
 
@@ -129,7 +130,8 @@ def render_configuration_page():
                             "Outlier Method",
                             ["none", "percentile", "winsorize", "iqr"],
                             index=["none", "percentile", "winsorize", "iqr"].index(scenario['method']),
-                            key=f"scenario_{idx}_method"
+                            key=f"scenario_{idx}_method",
+                            help=PARAMETER_TOOLTIPS.get("outlier_method", "")
                         )
                         scenario['method'] = outlier_method
                     
@@ -151,7 +153,8 @@ def render_configuration_page():
                                 value=scenario.get('p_low', 1.0),
                                 step=0.1,
                                 format="%.1f",
-                                key=f"scenario_{idx}_p_low"
+                                key=f"scenario_{idx}_p_low",
+                                help=PARAMETER_TOOLTIPS.get("p_low", "")
                             )
                             scenario['p_low'] = p_low
                         
@@ -163,7 +166,8 @@ def render_configuration_page():
                                 value=scenario.get('p_high', 99.0),
                                 step=0.1,
                                 format="%.1f",
-                                key=f"scenario_{idx}_p_high"
+                                key=f"scenario_{idx}_p_high",
+                                help=PARAMETER_TOOLTIPS.get("p_high", "")
                             )
                             scenario['p_high'] = p_high
                     
@@ -175,7 +179,8 @@ def render_configuration_page():
                             value=scenario.get('iqr_multiplier', 1.5),
                             step=0.1,
                             format="%.1f",
-                            key=f"scenario_{idx}_iqr_multiplier"
+                            key=f"scenario_{idx}_iqr_multiplier",
+                            help=PARAMETER_TOOLTIPS.get("iqr_multiplier", "")
                         )
                         scenario['iqr_multiplier'] = iqr_multiplier
     

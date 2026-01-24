@@ -25,6 +25,7 @@ from power_analysis.components import (
     render_validation_message
 )
 from power_analysis.scenarios_design import render_data_upload, render_configuration_page
+from power_analysis.guide import render_guide
 from utils.streamlit_artifacts import render_download_artifact_button as _render_download_artifact_button
 
 
@@ -44,10 +45,11 @@ def show_power_analysis_page():
     st.markdown("Analyze required sample sizes for A/B testing based on various statistical parameters")
 
     # Create main tabs for subpages
-    tab_upload, tab_config, tab_analysis = st.tabs([
+    tab_upload, tab_config, tab_analysis, tab_instructions = st.tabs([
         "📤 Data Upload",
         "⚙️ Configuration",
-        "🔬 Power Analysis"
+        "🔬 Power Analysis",
+        "📚 How-To Guide"
     ])
 
     # Tab 1: Data Upload
@@ -57,8 +59,12 @@ def show_power_analysis_page():
     # Tab 2: Configuration
     with tab_config:
         render_configuration_page()
+    
+    # Tab 3: How-To Guide
+    with tab_instructions:
+        render_guide()
 
-    # Tab 3: Power Analysis
+    # Tab 4: Power Analysis
     with tab_analysis:
         # Configuration section
         config = render_configuration_section()
@@ -193,11 +199,10 @@ def show_power_analysis_page():
             st.info(f"📊 Current Analysis: **{ttest_type}** t-test — {ttest_info.get(ttest_type, '')}")
         
         # Create tabs
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab3 = st.tabs([
             "🧮 Calculator",
             "📈 Single Plots",
-            "🗺️ Contour Maps",
-            "ℹ️ Instructions"
+            "🗺️ Contour Maps"
         ])
 
         # Tab 1: Calculator
@@ -312,8 +317,4 @@ def show_power_analysis_page():
                         # Plots are already added to artifact during computation, just render
                         render_plot_with_download(fig, plot_config["filename"])
 
-        # Tab 4: Instructions
-        with tab4:
-            st.write("TODO")
-            # render_instructions_tab()
 

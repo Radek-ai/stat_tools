@@ -10,6 +10,7 @@ from results_analysis.plots import (
     create_cuped_analysis_plotly,
     create_did_analysis_plotly
 )
+from results_analysis.tooltips import PARAMETER_TOOLTIPS
 from utils.streamlit_downloads import render_download_button, render_plot_with_download
 from scipy.stats import ttest_ind
 from utils.artifact_builder import ArtifactBuilder
@@ -60,7 +61,7 @@ def render_configuration():
         options=[""] + df.columns.tolist(),
         index=0,  # Default to empty
         key="results_group_column",
-        help="Select the column containing group assignments"
+        help=PARAMETER_TOOLTIPS.get("group_column", "")
     )
     
     if group_column and group_column != "":
@@ -146,7 +147,7 @@ def render_basic_analysis():
         options=base_numeric_cols,
         default=default_cols if default_cols else base_numeric_cols[:min(5, len(base_numeric_cols))],
         key="results_basic_metrics",
-        help="Select numeric metrics to analyze for treatment effects"
+        help=PARAMETER_TOOLTIPS.get("metric_columns", "")
     )
     
     if not value_columns:
@@ -293,7 +294,7 @@ def render_cuped_analysis():
             "Pre-experiment suffix",
             value="_pre",
             key="cuped_suffix_pre",
-            help="Suffix for pre-experiment metric columns (e.g., 'revenue_pre')"
+            help=PARAMETER_TOOLTIPS.get("cuped_suffix_pre", "")
         )
     
     with col_suffix2:
@@ -301,7 +302,7 @@ def render_cuped_analysis():
             "Post-experiment suffix",
             value="_post",
             key="cuped_suffix_post",
-            help="Suffix for post-experiment metric columns (e.g., 'revenue_post')"
+            help=PARAMETER_TOOLTIPS.get("cuped_suffix_post", "")
         )
     
     # Find base metrics (columns that have both pre and post versions)
@@ -330,7 +331,8 @@ def render_cuped_analysis():
         "Select Metrics for CUPED Analysis",
         options=base_metrics,
         default=base_metrics[:min(5, len(base_metrics))] if base_metrics else [],
-        key="cuped_metrics"
+        key="cuped_metrics",
+        help=PARAMETER_TOOLTIPS.get("cuped_metrics", "")
     )
     
     if not selected_metrics:
@@ -490,7 +492,7 @@ def render_did_analysis():
             "Pre-period suffix",
             value="_pre",
             key="did_suffix_pre",
-            help="Suffix for pre-period metric columns (e.g., 'revenue_pre')"
+            help=PARAMETER_TOOLTIPS.get("did_suffix_pre", "")
         )
     
     with col_suffix2:
@@ -498,7 +500,7 @@ def render_did_analysis():
             "Post-period suffix",
             value="_post",
             key="did_suffix_post",
-            help="Suffix for post-period metric columns (e.g., 'revenue_post')"
+            help=PARAMETER_TOOLTIPS.get("did_suffix_post", "")
         )
     
     # Find base metrics
@@ -527,7 +529,8 @@ def render_did_analysis():
         "Select Metrics for DiD Analysis",
         options=base_metrics,
         default=base_metrics[:min(5, len(base_metrics))] if base_metrics else [],
-        key="did_metrics"
+        key="did_metrics",
+        help=PARAMETER_TOOLTIPS.get("did_metrics", "")
     )
     
     if not selected_metrics:

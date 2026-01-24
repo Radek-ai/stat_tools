@@ -6,6 +6,7 @@ import streamlit as st
 import numpy as np
 
 from power_analysis.config import parse_statistics, get_default_stats_json
+from power_analysis.tooltips import PARAMETER_TOOLTIPS
 
 
 def render_configuration_section():
@@ -81,28 +82,92 @@ def render_configuration_section():
         
         col_a, col_b = st.columns(2)
         with col_a:
-            uplift_min = st.number_input("Min Uplift", value=0.005, format="%.4f", key="uplift_min")
-            alpha_min = st.number_input("Min Alpha", value=0.1, format="%.3f", key="alpha_min")
-            power_min = st.number_input("Min Power", value=0.6, format="%.2f", key="power_min")
+            uplift_min = st.number_input(
+                "Min Uplift", 
+                value=0.005, 
+                format="%.4f", 
+                key="uplift_min",
+                help=PARAMETER_TOOLTIPS.get("uplift_min", "")
+            )
+            alpha_min = st.number_input(
+                "Min Alpha", 
+                value=0.1, 
+                format="%.3f", 
+                key="alpha_min",
+                help=PARAMETER_TOOLTIPS.get("alpha_min", "")
+            )
+            power_min = st.number_input(
+                "Min Power", 
+                value=0.6, 
+                format="%.2f", 
+                key="power_min",
+                help=PARAMETER_TOOLTIPS.get("power_min", "")
+            )
         
         with col_b:
-            uplift_max = st.number_input("Max Uplift", value=0.1, format="%.4f", key="uplift_max")
-            alpha_max = st.number_input("Max Alpha", value=0.4, format="%.3f", key="alpha_max")
-            power_max = st.number_input("Max Power", value=0.9, format="%.2f", key="power_max")
+            uplift_max = st.number_input(
+                "Max Uplift", 
+                value=0.1, 
+                format="%.4f", 
+                key="uplift_max",
+                help=PARAMETER_TOOLTIPS.get("uplift_max", "")
+            )
+            alpha_max = st.number_input(
+                "Max Alpha", 
+                value=0.4, 
+                format="%.3f", 
+                key="alpha_max",
+                help=PARAMETER_TOOLTIPS.get("alpha_max", "")
+            )
+            power_max = st.number_input(
+                "Max Power", 
+                value=0.9, 
+                format="%.2f", 
+                key="power_max",
+                help=PARAMETER_TOOLTIPS.get("power_max", "")
+            )
         
         col_c, col_d, col_e = st.columns(3)
         with col_c:
-            uplift_points = st.number_input("Uplift Points", value=19, min_value=10, max_value=100, key="uplift_points")
+            uplift_points = st.number_input(
+                "Uplift Points", 
+                value=19, 
+                min_value=10, 
+                max_value=100, 
+                key="uplift_points",
+                help=PARAMETER_TOOLTIPS.get("uplift_points", "")
+            )
         with col_d:
-            alpha_points = st.number_input("Alpha Points", value=16, min_value=10, max_value=100, key="alpha_points")
+            alpha_points = st.number_input(
+                "Alpha Points", 
+                value=16, 
+                min_value=10, 
+                max_value=100, 
+                key="alpha_points",
+                help=PARAMETER_TOOLTIPS.get("alpha_points", "")
+            )
         with col_e:
-            power_points = st.number_input("Power Points", value=16, min_value=10, max_value=100, key="power_points")
+            power_points = st.number_input(
+                "Power Points", 
+                value=16, 
+                min_value=10, 
+                max_value=100, 
+                key="power_points",
+                help=PARAMETER_TOOLTIPS.get("power_points", "")
+            )
         
         st.divider()
         
         col_h, col_i = st.columns(2)
         with col_h:
-            n_groups = st.number_input("Number of Groups in Experiment", value=2, min_value=1, max_value=10, key="n_groups")
+            n_groups = st.number_input(
+                "Number of Groups in Experiment", 
+                value=2, 
+                min_value=1, 
+                max_value=10, 
+                key="n_groups",
+                help=PARAMETER_TOOLTIPS.get("n_groups", "")
+            )
             st.caption("For sample size allocation (e.g., control + treatment)")
         
         with col_i:
@@ -111,7 +176,7 @@ def render_configuration_section():
                 options=["two-sided", "larger", "smaller"],
                 index=0,
                 key="ttest_type",
-                help="two-sided: H1: μ1 ≠ μ2 | larger: H1: μ1 > μ2 | smaller: H1: μ1 < μ2"
+                help=PARAMETER_TOOLTIPS.get("ttest_type", "two-sided: H1: μ1 ≠ μ2 | larger: H1: μ1 > μ2 | smaller: H1: μ1 < μ2")
             )
             st.caption("Alternative hypothesis direction")
     

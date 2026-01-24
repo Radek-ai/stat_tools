@@ -10,6 +10,7 @@ from results_analysis.ui_components import (
     render_cuped_analysis,
     render_did_analysis
 )
+from results_analysis.guide import render_guide
 from utils.streamlit_artifacts import render_download_artifact_button as _render_download_artifact_button
 
 
@@ -29,10 +30,11 @@ def show_results_analysis_page():
     st.markdown("Analyze treatment effects, uplifts, and statistical significance of your A/B test results")
     
     # Create tabs
-    tab_upload, tab_config, tab_analysis = st.tabs([
+    tab_upload, tab_config, tab_analysis, tab_instructions = st.tabs([
         "📤 Data Upload",
         "⚙️ Configuration",
-        "📊 Analysis"
+        "📊 Analysis",
+        "📚 How-To Guide"
     ])
     
     with tab_upload:
@@ -57,3 +59,6 @@ def show_results_analysis_page():
         
         with sub_tab_did:
             render_did_analysis()
+    
+    with tab_instructions:
+        render_guide()

@@ -11,6 +11,7 @@ from scipy.stats import ttest_ind
 from utils.balance_plots import create_balance_report_plotly
 from utils.stats import smd as _smd
 from utils.streamlit_errors import handle_error
+from utils.artifact_builder import ArtifactBuilder
 
 
 def render_balancing_results(original_df: pd.DataFrame) -> None:
@@ -206,6 +207,11 @@ def render_balancing_results(original_df: pd.DataFrame) -> None:
                         height=400,
                         showlegend=False
                     )
+            
+            # Add loss plot to artifact
+            artifact = st.session_state.get('group_selection_artifact')
+            if artifact:
+                artifact.add_plot('loss_history', fig_loss, 'Loss convergence over iterations')
             
             st.plotly_chart(fig_loss, use_container_width=True)
             
